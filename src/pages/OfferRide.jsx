@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Container,
@@ -18,34 +18,39 @@ import {
   FormGroup,
   Divider,
   CircularProgress,
+  Autocomplete
 } from '@mui/material';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { TimePicker } from '@mui/x-date-pickers/TimePicker';
-import { GoogleMap, LoadScript, DirectionsRenderer, Autocomplete } from '@react-google-maps/api';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebase';
-import { collection, addDoc, query, where, getDocs } from 'firebase/firestore';
-import { createAutocompleteOptions, getMapOptions, getRoute, formatAddress, isWithinBangalore } from '../utils/maps';
+import { collection, addDoc } from 'firebase/firestore';
+import { getMapOptions, searchLocation, getRoute, formatAddress, isWithinBangalore } from '../utils/maps';
 import { handleNotification } from '../utils/notifications';
-import { loadGoogleMaps } from '../utils/loadGoogleMaps';
 
-const libraries = ['places'];
+// Fix Leaflet default icon issue
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
 
 const OfferRide = () => {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [directions, setDirections] = useState(null);
+  const [routeGeometry, setRouteGeometry] = useState(null);
   const [isRecurring, setIsRecurring] = useState(false);
-  const [mapsLoaded, setMapsLoaded] = useState(false);
+  const [sourceOptions, setSourceOptions] = useState([]);
+  const [destinationOptions, setDestinationOptions] = useState([]);
   
-  const sourceAutocomplete = useRef(null);
-  const destinationAutocomplete = useRef(null);
-  const mapRef = useRef(null);
-
   const [formData, setFormData] = useState({
     source: '',
     sourceDetails: null,
@@ -68,58 +73,70 @@ const OfferRide = () => {
     },
   });
 
-  useEffect(() => {
-    loadGoogleMaps()
-      .then(() => setMapsLoaded(true))
-      .catch(error => console.error('Error loading Google Maps:', error));
-  }, []);
+  const handleSourceSearch = async (event, value) => {
+    if (value.length < 3) return;
+    
+    try {
+      const results = await searchLocation(value);
+      setSourceOptions(results);
+    } catch (error) {
+      console.error('Error searching source location:', error);
+    }
+  };
 
-  const handleSourceSelect = async () => {
-    const place = sourceAutocomplete.current.getPlace();
-    if (!place.geometry) return;
+  const handleDestinationSearch = async (event, value) => {
+    if (value.length < 3) return;
+    
+    try {
+      const results = await searchLocation(value);
+      setDestinationOptions(results);
+    } catch (error) {
+      console.error('Error searching destination location:', error);
+    }
+  };
 
-    const address = formatAddress(place);
-    if (!isWithinBangalore(address.location.lat, address.location.lng)) {
+  const handleSourceSelect = async (event, place) => {
+    if (!place) return;
+
+    if (!isWithinBangalore(place.lat, place.lng)) {
       setError('Source location must be within Bangalore');
       return;
     }
 
     setFormData(prev => ({
       ...prev,
-      source: place.formatted_address,
-      sourceDetails: address
+      source: place.display_name,
+      sourceDetails: formatAddress(place)
     }));
 
     if (formData.destinationDetails) {
       try {
         const routeResult = await getRoute(
-          { lat: address.location.lat, lng: address.location.lng },
+          { lat: place.lat, lng: place.lng },
           { 
             lat: formData.destinationDetails.location.lat, 
             lng: formData.destinationDetails.location.lng 
           }
         );
-        setDirections(routeResult);
+        setRouteGeometry(routeResult.geometry);
       } catch (err) {
         console.error('Error getting route:', err);
       }
     }
   };
 
-  const handleDestinationSelect = async () => {
-    const place = destinationAutocomplete.current.getPlace();
-    if (!place.geometry) return;
+  const handleDestinationSelect = async (event, place) => {
+    if (!place) return;
 
-    const address = formatAddress(place);
-    if (!isWithinBangalore(address.location.lat, address.location.lng)) {
+    if (!isWithinBangalore(place.lat, place.lng)) {
       setError('Destination location must be within Bangalore');
       return;
     }
 
     setFormData(prev => ({
       ...prev,
-      destination: place.formatted_address,
-      destinationDetails: address
+      destination: place.display_name,
+      destinationDetails: formatAddress(place)
     }));
 
     if (formData.sourceDetails) {
@@ -129,9 +146,9 @@ const OfferRide = () => {
             lat: formData.sourceDetails.location.lat, 
             lng: formData.sourceDetails.location.lng 
           },
-          { lat: address.location.lat, lng: address.location.lng }
+          { lat: place.lat, lng: place.lng }
         );
-        setDirections(routeResult);
+        setRouteGeometry(routeResult.geometry);
       } catch (err) {
         console.error('Error getting route:', err);
       }
@@ -247,236 +264,233 @@ const OfferRide = () => {
     );
   }
 
-  if (!mapsLoaded) {
-    return (
-      <Container maxWidth="sm">
-        <Box sx={{ mt: 4, textAlign: 'center' }}>
-          <CircularProgress />
-          <Typography>Loading maps...</Typography>
-        </Box>
-      </Container>
-    );
-  }
-
   return (
-    <LoadScript
-      googleMapsApiKey={process.env.REACT_APP_GOOGLE_MAPS_API_KEY}
-      libraries={libraries}
-    >
-      <Container maxWidth="md">
-        <Box sx={{ mt: 4 }}>
-          <Paper sx={{ p: 4 }}>
-            <Typography variant="h4" gutterBottom>
-              Offer a Ride
-            </Typography>
+    <Container maxWidth="md">
+      <Box sx={{ mt: 4 }}>
+        <Paper sx={{ p: 4 }}>
+          <Typography variant="h4" gutterBottom>
+            Offer a Ride
+          </Typography>
 
-            {error && (
-              <Alert severity="error" sx={{ mb: 2 }}>
-                {error}
-              </Alert>
-            )}
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {error}
+            </Alert>
+          )}
 
-            <form onSubmit={handleSubmit}>
-              <Grid container spacing={3}>
-                {/* Map Display */}
-                <Grid item xs={12}>
-                  <Box sx={{ height: '300px', width: '100%', mb: 3 }}>
-                    <GoogleMap
-                      mapContainerStyle={{ height: '100%', width: '100%' }}
-                      options={getMapOptions()}
-                      onLoad={map => {
-                        mapRef.current = map;
-                      }}
-                    >
-                      {directions && (
-                        <DirectionsRenderer
-                          directions={directions}
-                          options={{
-                            suppressMarkers: false,
-                            preserveViewport: true,
-                          }}
-                        />
-                      )}
-                    </GoogleMap>
-                  </Box>
-                </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <Autocomplete
-                    onLoad={autocomplete => {
-                      sourceAutocomplete.current = autocomplete;
-                    }}
-                    onPlaceChanged={handleSourceSelect}
-                    options={createAutocompleteOptions()}
+          <form onSubmit={handleSubmit}>
+            <Grid container spacing={3}>
+              {/* Map Display */}
+              <Grid item xs={12}>
+                <Box sx={{ height: '300px', width: '100%', mb: 3 }}>
+                  <MapContainer
+                    {...getMapOptions()}
+                    style={{ height: '100%', width: '100%' }}
                   >
+                    <TileLayer
+                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                    />
+                    {formData.sourceDetails && (
+                      <Marker 
+                        position={[
+                          formData.sourceDetails.location.lat,
+                          formData.sourceDetails.location.lng
+                        ]}
+                      >
+                        <Popup>Pickup Location</Popup>
+                      </Marker>
+                    )}
+                    {formData.destinationDetails && (
+                      <Marker
+                        position={[
+                          formData.destinationDetails.location.lat,
+                          formData.destinationDetails.location.lng
+                        ]}
+                      >
+                        <Popup>Drop-off Location</Popup>
+                      </Marker>
+                    )}
+                    {routeGeometry && (
+                      <GeoJSON data={routeGeometry} style={{ color: '#0066ff', weight: 4 }} />
+                    )}
+                  </MapContainer>
+                </Box>
+              </Grid>
+
+              <Grid item xs={12} md={6}>
+                <Autocomplete
+                  freeSolo
+                  options={sourceOptions}
+                  getOptionLabel={(option) => option.display_name || ''}
+                  onInputChange={handleSourceSearch}
+                  onChange={handleSourceSelect}
+                  renderInput={(params) => (
                     <TextField
-                      name="source"
+                      {...params}
                       label="From"
                       fullWidth
-                      value={formData.source}
-                      onChange={handleChange}
                       required
                       placeholder="Enter pickup location"
                     />
-                  </Autocomplete>
-                </Grid>
+                  )}
+                />
+              </Grid>
 
-                <Grid item xs={12} md={6}>
-                  <Autocomplete
-                    onLoad={autocomplete => {
-                      destinationAutocomplete.current = autocomplete;
-                    }}
-                    onPlaceChanged={handleDestinationSelect}
-                    options={createAutocompleteOptions()}
-                  >
+              <Grid item xs={12} md={6}>
+                <Autocomplete
+                  freeSolo
+                  options={destinationOptions}
+                  getOptionLabel={(option) => option.display_name || ''}
+                  onInputChange={handleDestinationSearch}
+                  onChange={handleDestinationSelect}
+                  renderInput={(params) => (
                     <TextField
-                      name="destination"
+                      {...params}
                       label="To"
                       fullWidth
-                      value={formData.destination}
-                      onChange={handleChange}
                       required
-                      placeholder="Enter drop location"
+                      placeholder="Enter drop-off location"
                     />
-                  </Autocomplete>
-                </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <LocalizationProvider dateAdapter={AdapterDateFns}>
-                    <DatePicker
-                      label="Date"
-                      value={formData.date}
-                      onChange={(newDate) => setFormData(prev => ({ ...prev, date: newDate }))}
-                      renderInput={(params) => <TextField {...params} fullWidth required />}
-                      minDate={new Date()}
-                    />
-                  </LocalizationProvider>
-                </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <LocalizationProvider dateAdapter={AdapterDateFns}>
-                    <TimePicker
-                      label="Time"
-                      value={formData.time}
-                      onChange={(newTime) => setFormData(prev => ({ ...prev, time: newTime }))}
-                      renderInput={(params) => <TextField {...params} fullWidth required />}
-                    />
-                  </LocalizationProvider>
-                </Grid>
-
-                <Grid item xs={12}>
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={isRecurring}
-                        onChange={(e) => setIsRecurring(e.target.checked)}
-                      />
-                    }
-                    label="This is a recurring ride"
-                  />
-                </Grid>
-
-                {isRecurring && (
-                  <Grid item xs={12}>
-                    <Typography variant="subtitle1" gutterBottom>
-                      Select recurring days:
-                    </Typography>
-                    <FormGroup row>
-                      {Object.keys(formData.recurringDays).map((day) => (
-                        <FormControlLabel
-                          key={day}
-                          control={
-                            <Checkbox
-                              checked={formData.recurringDays[day]}
-                              onChange={() => handleRecurringDayChange(day)}
-                            />
-                          }
-                          label={day.charAt(0).toUpperCase() + day.slice(1)}
-                        />
-                      ))}
-                    </FormGroup>
-                  </Grid>
-                )}
-
-                <Grid item xs={12}>
-                  <Divider sx={{ my: 2 }} />
-                </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <FormControl fullWidth required>
-                    <InputLabel>Available Seats</InputLabel>
-                    <Select
-                      name="seats"
-                      value={formData.seats}
-                      onChange={handleChange}
-                      label="Available Seats"
-                    >
-                      {[1, 2, 3, 4, 5, 6].map((num) => (
-                        <MenuItem key={num} value={num}>
-                          {num}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <TextField
-                    name="price"
-                    label="Price per Seat"
-                    type="number"
-                    fullWidth
-                    value={formData.price}
-                    onChange={handleChange}
-                    required
-                    InputProps={{
-                      startAdornment: '₹',
-                    }}
-                  />
-                </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <TextField
-                    name="carModel"
-                    label="Car Model"
-                    fullWidth
-                    value={formData.carModel}
-                    onChange={handleChange}
-                    required
-                    placeholder="e.g., Honda City"
-                  />
-                </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <TextField
-                    name="carNumber"
-                    label="Car Number"
-                    fullWidth
-                    value={formData.carNumber}
-                    onChange={handleChange}
-                    required
-                    placeholder="e.g., KA-01-AB-1234"
-                  />
-                </Grid>
-
-                <Grid item xs={12}>
-                  <Button
-                    type="submit"
-                    variant="contained"
-                    color="primary"
-                    size="large"
-                    fullWidth
-                    disabled={loading}
-                  >
-                    {loading ? 'Creating Ride Offer...' : 'Offer Ride'}
-                  </Button>
-                </Grid>
+                  )}
+                />
               </Grid>
-            </form>
-          </Paper>
-        </Box>
-      </Container>
-    </LoadScript>
+
+              <Grid item xs={12} md={6}>
+                <LocalizationProvider dateAdapter={AdapterDateFns}>
+                  <DatePicker
+                    label="Date"
+                    value={formData.date}
+                    onChange={(newDate) => setFormData(prev => ({ ...prev, date: newDate }))}
+                    renderInput={(params) => <TextField {...params} fullWidth required />}
+                    minDate={new Date()}
+                  />
+                </LocalizationProvider>
+              </Grid>
+
+              <Grid item xs={12} md={6}>
+                <LocalizationProvider dateAdapter={AdapterDateFns}>
+                  <TimePicker
+                    label="Time"
+                    value={formData.time}
+                    onChange={(newTime) => setFormData(prev => ({ ...prev, time: newTime }))}
+                    renderInput={(params) => <TextField {...params} fullWidth required />}
+                  />
+                </LocalizationProvider>
+              </Grid>
+
+              <Grid item xs={12}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={isRecurring}
+                      onChange={(e) => setIsRecurring(e.target.checked)}
+                    />
+                  }
+                  label="This is a recurring ride"
+                />
+              </Grid>
+
+              {isRecurring && (
+                <Grid item xs={12}>
+                  <Typography variant="subtitle1" gutterBottom>
+                    Select recurring days:
+                  </Typography>
+                  <FormGroup row>
+                    {Object.keys(formData.recurringDays).map((day) => (
+                      <FormControlLabel
+                        key={day}
+                        control={
+                          <Checkbox
+                            checked={formData.recurringDays[day]}
+                            onChange={() => handleRecurringDayChange(day)}
+                          />
+                        }
+                        label={day.charAt(0).toUpperCase() + day.slice(1)}
+                      />
+                    ))}
+                  </FormGroup>
+                </Grid>
+              )}
+
+              <Grid item xs={12}>
+                <Divider sx={{ my: 2 }} />
+              </Grid>
+
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth required>
+                  <InputLabel>Available Seats</InputLabel>
+                  <Select
+                    name="seats"
+                    value={formData.seats}
+                    onChange={handleChange}
+                    label="Available Seats"
+                  >
+                    {[1, 2, 3, 4, 5, 6].map((num) => (
+                      <MenuItem key={num} value={num}>
+                        {num}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              <Grid item xs={12} md={6}>
+                <TextField
+                  name="price"
+                  label="Price per Seat"
+                  type="number"
+                  fullWidth
+                  value={formData.price}
+                  onChange={handleChange}
+                  required
+                  InputProps={{
+                    startAdornment: '₹',
+                  }}
+                />
+              </Grid>
+
+              <Grid item xs={12} md={6}>
+                <TextField
+                  name="carModel"
+                  label="Car Model"
+                  fullWidth
+                  value={formData.carModel}
+                  onChange={handleChange}
+                  required
+                  placeholder="e.g., Honda City"
+                />
+              </Grid>
+
+              <Grid item xs={12} md={6}>
+                <TextField
+                  name="carNumber"
+                  label="Car Number"
+                  fullWidth
+                  value={formData.carNumber}
+                  onChange={handleChange}
+                  required
+                  placeholder="e.g., KA-01-AB-1234"
+                />
+              </Grid>
+
+              <Grid item xs={12}>
+                <Button
+                  type="submit"
+                  variant="contained"
+                  color="primary"
+                  size="large"
+                  fullWidth
+                  disabled={loading}
+                >
+                  {loading ? 'Creating Ride Offer...' : 'Offer Ride'}
+                </Button>
+              </Grid>
+            </Grid>
+          </form>
+        </Paper>
+      </Box>
+    </Container>
   );
 };
 

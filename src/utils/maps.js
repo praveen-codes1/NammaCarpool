@@ -1,5 +1,5 @@
 // Bangalore boundaries
-const BANGALORE_BOUNDS = {
+export const BANGALORE_BOUNDS = {
   north: 13.023577,
   south: 12.823577,
   east: 77.747774,
@@ -17,59 +17,80 @@ export const createAutocompleteOptions = () => ({
   types: ['geocode', 'establishment'],
 });
 
-// Get default map options centered on Bangalore
+// Default map options centered on Bangalore
 export const getMapOptions = () => ({
-  center: { lat: 12.923577, lng: 77.597774 }, // Bangalore center
+  center: [12.923577, 77.597774], // Bangalore center [lat, lng]
   zoom: 12,
-  mapTypeControl: false,
-  streetViewControl: false,
-  fullscreenControl: true,
-  zoomControl: true,
-  restriction: {
-    latLngBounds: BANGALORE_BOUNDS,
-    strictBounds: true,
-  },
+  minZoom: 11,
+  maxZoom: 18,
+  maxBounds: [
+    [BANGALORE_BOUNDS.south, BANGALORE_BOUNDS.west],
+    [BANGALORE_BOUNDS.north, BANGALORE_BOUNDS.east]
+  ]
 });
 
-// Get route between two points
-export const getRoute = (origin, destination) => {
-  const directionsService = new google.maps.DirectionsService();
-
-  return new Promise((resolve, reject) => {
-    directionsService.route(
-      {
-        origin: origin,
-        destination: destination,
-        travelMode: google.maps.TravelMode.DRIVING,
-      },
-      (result, status) => {
-        if (status === google.maps.DirectionsStatus.OK) {
-          resolve(result);
-        } else {
-          reject(new Error(`Failed to get route: ${status}`));
-        }
-      }
+// Get route between two points using OSRM
+export const getRoute = async (origin, destination) => {
+  try {
+    const response = await fetch(
+      `https://router.project-osrm.org/route/v1/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=full&geometries=geojson`
     );
-  });
+
+    if (!response.ok) {
+      throw new Error('Failed to get route');
+    }
+
+    const data = await response.json();
+    
+    if (!data.routes || data.routes.length === 0) {
+      throw new Error('No route found');
+    }
+
+    return {
+      geometry: {
+        type: 'Feature',
+        properties: {},
+        geometry: data.routes[0].geometry
+      },
+      distance: data.routes[0].distance,
+      duration: data.routes[0].duration
+    };
+  } catch (error) {
+    console.error('Error getting route:', error);
+    throw error;
+  }
 };
 
-// Format address from Google Places result
-export const formatAddress = (place) => {
-  const addressComponents = place.address_components;
-  const location = place.geometry.location;
+// Search location using OpenStreetMap Nominatim
+export const searchLocation = async (query) => {
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&bounded=1&viewbox=${BANGALORE_BOUNDS.west},${BANGALORE_BOUNDS.north},${BANGALORE_BOUNDS.east},${BANGALORE_BOUNDS.south}&countrycodes=in`
+    );
+    
+    if (!response.ok) {
+      throw new Error('Failed to search location');
+    }
 
+    const data = await response.json();
+    return data.filter(place => isWithinBangalore(parseFloat(place.lat), parseFloat(place.lon)));
+  } catch (error) {
+    console.error('Error searching location:', error);
+    return [];
+  }
+};
+
+// Format address from OpenStreetMap Nominatim response
+export const formatAddress = (place) => {
   return {
-    fullAddress: place.formatted_address,
     location: {
-      lat: location.lat(),
-      lng: location.lng(),
+      lat: parseFloat(place.lat),
+      lng: parseFloat(place.lon || place.lng)
     },
+    formattedAddress: place.display_name,
     placeId: place.place_id,
-    components: addressComponents.reduce((acc, component) => {
-      const type = component.types[0];
-      acc[type] = component.long_name;
-      return acc;
-    }, {}),
+    mainText: place.display_name.split(',')[0],
+    secondaryText: place.display_name.split(',').slice(1).join(',').trim()
   };
 };
 

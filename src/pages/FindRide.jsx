@@ -20,12 +20,15 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  Autocomplete,
 } from '@mui/material';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { format } from 'date-fns';
-import { GoogleMap, LoadScript, DirectionsRenderer, Autocomplete, Marker } from '@react-google-maps/api';
+import { MapContainer, TileLayer, Marker, Popup, GeoJSON } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebase';
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, getDoc } from 'firebase/firestore';
@@ -33,7 +36,13 @@ import { createAutocompleteOptions, getMapOptions, getRoute, formatAddress, isWi
 import { handleNotification } from '../utils/notifications';
 import { loadGoogleMaps } from '../utils/loadGoogleMaps';
 
-const libraries = ['places'];
+// Fix Leaflet default icon issue
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
 
 const FindRide = () => {
   const { currentUser } = useAuth();
@@ -42,7 +51,7 @@ const FindRide = () => {
   const [searchResults, setSearchResults] = useState([]);
   const [selectedRide, setSelectedRide] = useState(null);
   const [bookingSeats, setBookingSeats] = useState(1);
-  const [directions, setDirections] = useState(null);
+  const [routeGeometry, setRouteGeometry] = useState(null);
   const [showBookingDialog, setShowBookingDialog] = useState(false);
   const [mapsLoaded, setMapsLoaded] = useState(false);
 
@@ -58,44 +67,104 @@ const FindRide = () => {
     date: null,
   });
 
+  const [sourceOptions, setSourceOptions] = useState([]);
+  const [destinationOptions, setDestinationOptions] = useState([]);
+
   useEffect(() => {
     loadGoogleMaps()
       .then(() => setMapsLoaded(true))
       .catch(error => console.error('Error loading Google Maps:', error));
   }, []);
 
-  const handleSourceSelect = async () => {
-    const place = sourceAutocomplete.current.getPlace();
-    if (!place.geometry) return;
+  const handleSourceSearch = async (event, value) => {
+    if (value.length < 3) return;
+    
+    try {
+      const results = await searchLocation(value);
+      setSourceOptions(results);
+    } catch (error) {
+      console.error('Error searching source location:', error);
+    }
+  };
 
-    const address = formatAddress(place);
-    if (!isWithinBangalore(address.location.lat, address.location.lng)) {
+  const handleDestinationSearch = async (event, value) => {
+    if (value.length < 3) return;
+    
+    try {
+      const results = await searchLocation(value);
+      setDestinationOptions(results);
+    } catch (error) {
+      console.error('Error searching destination location:', error);
+    }
+  };
+
+  const handleSourceSelect = async (event, place) => {
+    if (!place) return;
+
+    if (!isWithinBangalore(place.lat, place.lng)) {
       setError('Source location must be within Bangalore');
       return;
     }
 
     setSearchData(prev => ({
       ...prev,
-      source: place.formatted_address,
-      sourceDetails: address
+      source: place.display_name,
+      sourceDetails: formatAddress(place)
     }));
+
+    if (searchData.destinationDetails) {
+      try {
+        const routeResult = await getRoute(
+          { lat: place.lat, lng: place.lng },
+          searchData.destinationDetails.location
+        );
+        setRouteGeometry(routeResult.geometry);
+      } catch (err) {
+        console.error('Error getting route:', err);
+      }
+    }
   };
 
-  const handleDestinationSelect = async () => {
-    const place = destinationAutocomplete.current.getPlace();
-    if (!place.geometry) return;
+  const handleDestinationSelect = async (event, place) => {
+    if (!place) return;
 
-    const address = formatAddress(place);
-    if (!isWithinBangalore(address.location.lat, address.location.lng)) {
+    if (!isWithinBangalore(place.lat, place.lng)) {
       setError('Destination location must be within Bangalore');
       return;
     }
 
     setSearchData(prev => ({
       ...prev,
-      destination: place.formatted_address,
-      destinationDetails: address
+      destination: place.display_name,
+      destinationDetails: formatAddress(place)
     }));
+
+    if (searchData.sourceDetails) {
+      try {
+        const routeResult = await getRoute(
+          searchData.sourceDetails.location,
+          { lat: place.lat, lng: place.lng }
+        );
+        setRouteGeometry(routeResult.geometry);
+      } catch (err) {
+        console.error('Error getting route:', err);
+      }
+    }
+  };
+
+  const calculateDistance = (point1, point2) => {
+    const R = 6371e3; // Earth's radius in meters
+    const φ1 = point1.lat * Math.PI/180;
+    const φ2 = point2.lat * Math.PI/180;
+    const Δφ = (point2.lat - point1.lat) * Math.PI/180;
+    const Δλ = (point2.lng - point1.lng) * Math.PI/180;
+
+    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ/2) * Math.sin(Δλ/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+    return R * c; // Distance in meters
   };
 
   const handleSearch = async () => {
@@ -136,14 +205,14 @@ const FindRide = () => {
         const rideData = doc.data();
         
         // Calculate distance between search points and ride points
-        const sourceDistance = google.maps.geometry.spherical.computeDistanceBetween(
-          new google.maps.LatLng(searchData.sourceDetails.location),
-          new google.maps.LatLng(rideData.sourceLocation)
+        const sourceDistance = calculateDistance(
+          searchData.sourceDetails.location,
+          rideData.sourceLocation
         );
         
-        const destinationDistance = google.maps.geometry.spherical.computeDistanceBetween(
-          new google.maps.LatLng(searchData.destinationDetails.location),
-          new google.maps.LatLng(rideData.destinationLocation)
+        const destinationDistance = calculateDistance(
+          searchData.destinationDetails.location,
+          rideData.destinationLocation
         );
         
         // Filter rides within 2km radius of search points
@@ -164,7 +233,7 @@ const FindRide = () => {
             searchData.sourceDetails.location,
             searchData.destinationDetails.location
           );
-          setDirections(routeResult);
+          setRouteGeometry(routeResult.geometry);
         } catch (err) {
           console.error('Error getting route:', err);
         }
@@ -251,214 +320,213 @@ const FindRide = () => {
   }
 
   return (
-    <LoadScript
-      googleMapsApiKey={process.env.REACT_APP_GOOGLE_MAPS_API_KEY}
-      libraries={libraries}
-    >
-      <Container maxWidth="md">
-        <Box sx={{ mt: 4 }}>
-          <Paper sx={{ p: 4, mb: 4 }}>
-            <Typography variant="h4" gutterBottom>
-              Find a Ride
-            </Typography>
+    <Container maxWidth="md">
+      <Box sx={{ mt: 4 }}>
+        <Paper sx={{ p: 4, mb: 4 }}>
+          <Typography variant="h4" gutterBottom>
+            Find a Ride
+          </Typography>
 
-            {error && (
-              <Alert severity="error" sx={{ mb: 2 }}>
-                {error}
-              </Alert>
-            )}
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {error}
+            </Alert>
+          )}
 
-            <Grid container spacing={3}>
-              {/* Map Display */}
-              <Grid item xs={12}>
-                <Box sx={{ height: '300px', width: '100%', mb: 3 }}>
-                  <GoogleMap
-                    mapContainerStyle={{ height: '100%', width: '100%' }}
-                    options={getMapOptions()}
-                    onLoad={map => {
-                      mapRef.current = map;
-                    }}
-                  >
-                    {directions && (
-                      <DirectionsRenderer
-                        directions={directions}
-                        options={{
-                          suppressMarkers: false,
-                          preserveViewport: true,
-                        }}
-                      />
-                    )}
-                    {searchResults.map((ride) => (
-                      <Marker
-                        key={ride.id}
-                        position={ride.sourceLocation}
-                        title={`Pickup: ${ride.source}`}
-                      />
-                    ))}
-                  </GoogleMap>
-                </Box>
-              </Grid>
-
-              <Grid item xs={12} md={4}>
-                <Autocomplete
-                  onLoad={autocomplete => {
-                    sourceAutocomplete.current = autocomplete;
-                  }}
-                  onPlaceChanged={handleSourceSelect}
-                  options={createAutocompleteOptions()}
+          <Grid container spacing={3}>
+            {/* Map Display */}
+            <Grid item xs={12}>
+              <Box sx={{ height: '300px', width: '100%', mb: 3 }}>
+                <MapContainer
+                  {...getMapOptions()}
+                  style={{ height: '100%', width: '100%' }}
                 >
-                  <TextField
-                    label="From"
-                    fullWidth
-                    value={searchData.source}
-                    placeholder="Enter pickup location"
+                  <TileLayer
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                   />
-                </Autocomplete>
-              </Grid>
-
-              <Grid item xs={12} md={4}>
-                <Autocomplete
-                  onLoad={autocomplete => {
-                    destinationAutocomplete.current = autocomplete;
-                  }}
-                  onPlaceChanged={handleDestinationSelect}
-                  options={createAutocompleteOptions()}
-                >
-                  <TextField
-                    label="To"
-                    fullWidth
-                    value={searchData.destination}
-                    placeholder="Enter drop location"
-                  />
-                </Autocomplete>
-              </Grid>
-
-              <Grid item xs={12} md={4}>
-                <LocalizationProvider dateAdapter={AdapterDateFns}>
-                  <DatePicker
-                    label="Date"
-                    value={searchData.date}
-                    onChange={(newDate) => setSearchData(prev => ({ ...prev, date: newDate }))}
-                    renderInput={(params) => <TextField {...params} fullWidth />}
-                    minDate={new Date()}
-                  />
-                </LocalizationProvider>
-              </Grid>
-
-              <Grid item xs={12}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  size="large"
-                  onClick={handleSearch}
-                  fullWidth
-                  disabled={loading}
-                >
-                  {loading ? <CircularProgress size={24} /> : 'Search Rides'}
-                </Button>
-              </Grid>
-            </Grid>
-          </Paper>
-
-          {/* Search Results */}
-          <Box sx={{ mt: 4 }}>
-            <Typography variant="h5" gutterBottom>
-              Available Rides
-            </Typography>
-            {searchResults.length === 0 ? (
-              <Typography color="textSecondary" align="center">
-                No rides found. Try adjusting your search criteria.
-              </Typography>
-            ) : (
-              <Grid container spacing={3}>
-                {searchResults.map((ride) => (
-                  <Grid item xs={12} key={ride.id}>
-                    <Card>
-                      <CardContent>
-                        <Typography variant="h6">
-                          {ride.source} to {ride.destination}
-                        </Typography>
-                        <Typography color="textSecondary">
-                          {format(ride.dateTime.toDate(), 'PPP p')}
-                        </Typography>
-                        <Typography>
-                          Available Seats: {ride.seats}
-                        </Typography>
-                        <Typography>
+                  {routeGeometry && (
+                    <GeoJSON data={routeGeometry} style={{ color: '#0066ff', weight: 4 }} />
+                  )}
+                  {searchResults.map((ride) => (
+                    <Marker
+                      key={ride.id}
+                      position={[ride.sourceLocation.lat, ride.sourceLocation.lng]}
+                    >
+                      <Popup>
+                        <Typography variant="subtitle2">Pickup: {ride.source}</Typography>
+                        <Typography variant="body2">
+                          Available seats: {ride.seats}<br />
                           Price: ₹{ride.price} per seat
                         </Typography>
-                        <Typography variant="body2" color="textSecondary">
-                          Driver: {ride.driverEmail}
-                        </Typography>
-                        <Typography variant="body2">
-                          Car: {ride.carModel} ({ride.carNumber})
-                        </Typography>
-                      </CardContent>
-                      <CardActions>
-                        <Button
-                          size="small"
-                          variant="contained"
-                          color="primary"
-                          disabled={!currentUser || ride.seats === 0}
-                          onClick={() => {
-                            setSelectedRide(ride);
-                            setShowBookingDialog(true);
-                          }}
-                        >
-                          Book Now
-                        </Button>
-                      </CardActions>
-                    </Card>
-                  </Grid>
+                      </Popup>
+                    </Marker>
+                  ))}
+                </MapContainer>
+              </Box>
+            </Grid>
+
+            <Grid item xs={12} md={4}>
+              <Autocomplete
+                freeSolo
+                options={sourceOptions}
+                getOptionLabel={(option) => option.display_name || ''}
+                onInputChange={handleSourceSearch}
+                onChange={handleSourceSelect}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="From"
+                    fullWidth
+                    placeholder="Enter pickup location"
+                  />
+                )}
+              />
+            </Grid>
+
+            <Grid item xs={12} md={4}>
+              <Autocomplete
+                freeSolo
+                options={destinationOptions}
+                getOptionLabel={(option) => option.display_name || ''}
+                onInputChange={handleDestinationSearch}
+                onChange={handleDestinationSelect}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="To"
+                    fullWidth
+                    placeholder="Enter drop-off location"
+                  />
+                )}
+              />
+            </Grid>
+
+            <Grid item xs={12} md={4}>
+              <LocalizationProvider dateAdapter={AdapterDateFns}>
+                <DatePicker
+                  label="Date"
+                  value={searchData.date}
+                  onChange={(newDate) => setSearchData(prev => ({ ...prev, date: newDate }))}
+                  renderInput={(params) => <TextField {...params} fullWidth />}
+                  minDate={new Date()}
+                />
+              </LocalizationProvider>
+            </Grid>
+
+            <Grid item xs={12}>
+              <Button
+                variant="contained"
+                color="primary"
+                size="large"
+                onClick={handleSearch}
+                fullWidth
+                disabled={loading}
+              >
+                {loading ? <CircularProgress size={24} /> : 'Search Rides'}
+              </Button>
+            </Grid>
+          </Grid>
+        </Paper>
+
+        {/* Search Results */}
+        <Box sx={{ mt: 4 }}>
+          <Typography variant="h5" gutterBottom>
+            Available Rides
+          </Typography>
+          {searchResults.length === 0 ? (
+            <Typography color="textSecondary" align="center">
+              No rides found. Try adjusting your search criteria.
+            </Typography>
+          ) : (
+            <Grid container spacing={3}>
+              {searchResults.map((ride) => (
+                <Grid item xs={12} key={ride.id}>
+                  <Card>
+                    <CardContent>
+                      <Typography variant="h6">
+                        {ride.source} to {ride.destination}
+                      </Typography>
+                      <Typography color="textSecondary">
+                        {format(ride.dateTime.toDate(), 'PPP p')}
+                      </Typography>
+                      <Typography>
+                        Available Seats: {ride.seats}
+                      </Typography>
+                      <Typography>
+                        Price: ₹{ride.price} per seat
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        Driver: {ride.driverEmail}
+                      </Typography>
+                      <Typography variant="body2">
+                        Car: {ride.carModel} ({ride.carNumber})
+                      </Typography>
+                    </CardContent>
+                    <CardActions>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        color="primary"
+                        disabled={!currentUser || ride.seats === 0}
+                        onClick={() => {
+                          setSelectedRide(ride);
+                          setShowBookingDialog(true);
+                        }}
+                      >
+                        Book Now
+                      </Button>
+                    </CardActions>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
+          )}
+        </Box>
+      </Box>
+
+      {/* Booking Dialog */}
+      <Dialog
+        open={showBookingDialog}
+        onClose={() => setShowBookingDialog(false)}
+      >
+        <DialogTitle>Book Ride</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <FormControl fullWidth>
+              <InputLabel>Number of Seats</InputLabel>
+              <Select
+                value={bookingSeats}
+                onChange={(e) => setBookingSeats(e.target.value)}
+                label="Number of Seats"
+              >
+                {[...Array(selectedRide?.seats || 0)].map((_, index) => (
+                  <MenuItem key={index + 1} value={index + 1}>
+                    {index + 1}
+                  </MenuItem>
                 ))}
-              </Grid>
+              </Select>
+            </FormControl>
+            {selectedRide && (
+              <Typography sx={{ mt: 2 }}>
+                Total Price: ₹{bookingSeats * selectedRide.price}
+              </Typography>
             )}
           </Box>
-        </Box>
-
-        {/* Booking Dialog */}
-        <Dialog
-          open={showBookingDialog}
-          onClose={() => setShowBookingDialog(false)}
-        >
-          <DialogTitle>Book Ride</DialogTitle>
-          <DialogContent>
-            <Box sx={{ pt: 2 }}>
-              <FormControl fullWidth>
-                <InputLabel>Number of Seats</InputLabel>
-                <Select
-                  value={bookingSeats}
-                  onChange={(e) => setBookingSeats(e.target.value)}
-                  label="Number of Seats"
-                >
-                  {[...Array(selectedRide?.seats || 0)].map((_, index) => (
-                    <MenuItem key={index + 1} value={index + 1}>
-                      {index + 1}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              {selectedRide && (
-                <Typography sx={{ mt: 2 }}>
-                  Total Price: ₹{bookingSeats * selectedRide.price}
-                </Typography>
-              )}
-            </Box>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setShowBookingDialog(false)}>Cancel</Button>
-            <Button
-              onClick={handleBookRide}
-              variant="contained"
-              color="primary"
-              disabled={loading}
-            >
-              {loading ? 'Booking...' : 'Confirm Booking'}
-            </Button>
-          </DialogActions>
-        </Dialog>
-      </Container>
-    </LoadScript>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowBookingDialog(false)}>Cancel</Button>
+          <Button
+            onClick={handleBookRide}
+            variant="contained"
+            color="primary"
+            disabled={loading}
+          >
+            {loading ? 'Booking...' : 'Confirm Booking'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Container>
   );
 };
 

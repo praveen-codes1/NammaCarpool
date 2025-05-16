@@ -1,50 +1,9 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper functions
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-    
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
-
-    // Production rules
-    match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow write: if isOwner(userId);
-    }
-
     match /rides/{rideId} {
-      allow read: if true; // Anyone can read ride listings
-      allow create: if isAuthenticated();
-      allow update, delete: if isAuthenticated() && 
-        resource.data.driverId == request.auth.uid;
-    }
-
-    match /bookings/{bookingId} {
-      allow read: if isAuthenticated() && (
-        resource.data.passengerId == request.auth.uid ||
-        resource.data.driverId == request.auth.uid
-      );
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated() && (
-        resource.data.passengerId == request.auth.uid ||
-        resource.data.driverId == request.auth.uid
-      );
-      allow delete: if isAuthenticated() && 
-        resource.data.passengerId == request.auth.uid;
-    }
-
-    // Test mode rules (only apply when using emulator)
-    match /{document=**} {
-      allow read, write: if false; // Disable direct access in production
-      
-      // Enable all access in test environment
-      // Use Firebase emulator for testing
-      // firebase.useEmulator("localhost", 8080);
+      allow read: if true;
+      allow write: if request.auth != null;
     }
   }
-} 
+}
