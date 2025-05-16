@@ -49,7 +49,7 @@ export const requestNotificationPermission = async () => {
     return null;
   }
 };
-
+console.log("FIREBASE APP ID:", import.meta.env.VITE_FIREBASE_APP_ID);
 // Handle foreground messages
 export const onMessageListener = () =>
   new Promise((resolve) => {

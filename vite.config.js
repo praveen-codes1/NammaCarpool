@@ -22,8 +22,7 @@ export default defineConfig(({ mode }) => {
       'process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID': JSON.stringify(env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID),
       'process.env.REACT_APP_FIREBASE_APP_ID': JSON.stringify(env.REACT_APP_FIREBASE_APP_ID),
       'process.env.REACT_APP_FIREBASE_MEASUREMENT_ID': JSON.stringify(env.REACT_APP_FIREBASE_MEASUREMENT_ID),
-      'process.env.REACT_APP_FIREBASE_VAPID_KEY': JSON.stringify(env.REACT_APP_FIREBASE_VAPID_KEY),
-      'process.env.REACT_APP_GOOGLE_MAPS_API_KEY': JSON.stringify(env.REACT_APP_GOOGLE_MAPS_API_KEY)
+      'process.env.REACT_APP_FIREBASE_VAPID_KEY': JSON.stringify(env.REACT_APP_FIREBASE_VAPID_KEY)
     }
   }
 }) 

@@ -78,6 +78,7 @@ const OfferRide = () => {
   });
 
   const handleSourceSearch = async (event, value) => {
+    console.log("Source input:", value);
     if (value.length < 3) return;
     
     try {
@@ -89,6 +90,7 @@ const OfferRide = () => {
   };
 
   const handleDestinationSearch = async (event, value) => {
+    console.log("Destination input:", value);
     if (value.length < 3) return;
     
     try {
@@ -100,19 +102,20 @@ const OfferRide = () => {
   };
 
   const handleSourceSelect = async (event, place) => {
-    if (!place) return;
-
+    console.log("Selected source place:", place);
+    if (!place || typeof place !== 'object') {
+      setError('Please select a location from the suggestions.');
+      return;
+    }
     if (!isWithinBangalore(place.lat, place.lng)) {
       setError('Source location must be within Bangalore');
       return;
     }
-
     setFormData(prev => ({
       ...prev,
       source: place.display_name,
-      sourceDetails: formatAddress(place)
+      sourceDetails: place
     }));
-
     if (formData.destinationDetails) {
       try {
         const routeResult = await getRoute(
@@ -130,19 +133,20 @@ const OfferRide = () => {
   };
 
   const handleDestinationSelect = async (event, place) => {
-    if (!place) return;
-
+    console.log("Selected destination place:", place);
+    if (!place || typeof place !== 'object') {
+      setError('Please select a location from the suggestions.');
+      return;
+    }
     if (!isWithinBangalore(place.lat, place.lng)) {
       setError('Destination location must be within Bangalore');
       return;
     }
-
     setFormData(prev => ({
       ...prev,
       destination: place.display_name,
-      destinationDetails: formatAddress(place)
+      destinationDetails: place
     }));
-
     if (formData.sourceDetails) {
       try {
         const routeResult = await getRoute(
@@ -324,11 +328,12 @@ const OfferRide = () => {
 
               <Grid item xs={12} md={6}>
                 <Autocomplete
-                  freeSolo
+                  freeSolo={false}
                   options={sourceOptions}
                   getOptionLabel={(option) => option.display_name || ''}
                   onInputChange={handleSourceSearch}
                   onChange={handleSourceSelect}
+                  value={formData.sourceDetails}
                   renderInput={(params) => (
                     <TextField
                       {...params}
@@ -343,11 +348,12 @@ const OfferRide = () => {
 
               <Grid item xs={12} md={6}>
                 <Autocomplete
-                  freeSolo
+                  freeSolo={false}
                   options={destinationOptions}
                   getOptionLabel={(option) => option.display_name || ''}
                   onInputChange={handleDestinationSearch}
                   onChange={handleDestinationSelect}
+                  value={formData.destinationDetails}
                   renderInput={(params) => (
                     <TextField
                       {...params}
@@ -366,7 +372,7 @@ const OfferRide = () => {
                     label="Date"
                     value={formData.date}
                     onChange={(newDate) => setFormData(prev => ({ ...prev, date: newDate }))}
-                    renderInput={(params) => <TextField {...params} fullWidth required />}
+                    slotProps={{ textField: { fullWidth: true, required: true } }}
                     minDate={new Date()}
                   />
                 </LocalizationProvider>
@@ -378,7 +384,7 @@ const OfferRide = () => {
                     label="Time"
                     value={formData.time}
                     onChange={(newTime) => setFormData(prev => ({ ...prev, time: newTime }))}
-                    renderInput={(params) => <TextField {...params} fullWidth required />}
+                    slotProps={{ textField: { fullWidth: true, required: true } }}
                   />
                 </LocalizationProvider>
               </Grid>

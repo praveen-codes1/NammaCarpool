@@ -34,7 +34,6 @@ import { db } from '../config/firebase';
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, getDoc } from 'firebase/firestore';
 import { createAutocompleteOptions, getMapOptions, getRoute, formatAddress, isWithinBangalore } from '../utils/maps';
 import { handleNotification } from '../utils/notifications';
-import { loadGoogleMaps } from '../utils/loadGoogleMaps';
 import { configureMapIcons } from '../utils/mapIcons';
 
 // Fix Leaflet default icon issue
@@ -57,7 +56,7 @@ const FindRide = () => {
   const [bookingSeats, setBookingSeats] = useState(1);
   const [routeGeometry, setRouteGeometry] = useState(null);
   const [showBookingDialog, setShowBookingDialog] = useState(false);
-  const [mapsLoaded, setMapsLoaded] = useState(false);
+  const [mapsLoaded, setMapsLoaded] = useState(true);
 
   const sourceAutocomplete = useRef(null);
   const destinationAutocomplete = useRef(null);
@@ -74,15 +73,9 @@ const FindRide = () => {
   const [sourceOptions, setSourceOptions] = useState([]);
   const [destinationOptions, setDestinationOptions] = useState([]);
 
-  useEffect(() => {
-    loadGoogleMaps()
-      .then(() => setMapsLoaded(true))
-      .catch(error => console.error('Error loading Google Maps:', error));
-  }, []);
-
   const handleSourceSearch = async (event, value) => {
+    console.log("Source input:", value);
     if (value.length < 3) return;
-    
     try {
       const results = await searchLocation(value);
       setSourceOptions(results);
@@ -92,8 +85,8 @@ const FindRide = () => {
   };
 
   const handleDestinationSearch = async (event, value) => {
+    console.log("Destination input:", value);
     if (value.length < 3) return;
-    
     try {
       const results = await searchLocation(value);
       setDestinationOptions(results);
@@ -103,19 +96,20 @@ const FindRide = () => {
   };
 
   const handleSourceSelect = async (event, place) => {
-    if (!place) return;
-
+    console.log("Selected source place:", place);
+    if (!place || typeof place !== 'object') {
+      setError('Please select a location from the suggestions.');
+      return;
+    }
     if (!isWithinBangalore(place.lat, place.lng)) {
       setError('Source location must be within Bangalore');
       return;
     }
-
     setSearchData(prev => ({
       ...prev,
       source: place.display_name,
-      sourceDetails: formatAddress(place)
+      sourceDetails: place
     }));
-
     if (searchData.destinationDetails) {
       try {
         const routeResult = await getRoute(
@@ -130,19 +124,20 @@ const FindRide = () => {
   };
 
   const handleDestinationSelect = async (event, place) => {
-    if (!place) return;
-
+    console.log("Selected destination place:", place);
+    if (!place || typeof place !== 'object') {
+      setError('Please select a location from the suggestions.');
+      return;
+    }
     if (!isWithinBangalore(place.lat, place.lng)) {
       setError('Destination location must be within Bangalore');
       return;
     }
-
     setSearchData(prev => ({
       ...prev,
       destination: place.display_name,
-      destinationDetails: formatAddress(place)
+      destinationDetails: place
     }));
-
     if (searchData.sourceDetails) {
       try {
         const routeResult = await getRoute(
@@ -372,11 +367,12 @@ const FindRide = () => {
 
             <Grid item xs={12} md={4}>
               <Autocomplete
-                freeSolo
+                freeSolo={false}
                 options={sourceOptions}
                 getOptionLabel={(option) => option.display_name || ''}
                 onInputChange={handleSourceSearch}
                 onChange={handleSourceSelect}
+                value={searchData.sourceDetails}
                 renderInput={(params) => (
                   <TextField
                     {...params}
@@ -390,11 +386,12 @@ const FindRide = () => {
 
             <Grid item xs={12} md={4}>
               <Autocomplete
-                freeSolo
+                freeSolo={false}
                 options={destinationOptions}
                 getOptionLabel={(option) => option.display_name || ''}
                 onInputChange={handleDestinationSearch}
                 onChange={handleDestinationSelect}
+                value={searchData.destinationDetails}
                 renderInput={(params) => (
                   <TextField
                     {...params}
@@ -412,7 +409,7 @@ const FindRide = () => {
                   label="Date"
                   value={searchData.date}
                   onChange={(newDate) => setSearchData(prev => ({ ...prev, date: newDate }))}
-                  renderInput={(params) => <TextField {...params} fullWidth />}
+                  slotProps={{ textField: { fullWidth: true } }}
                   minDate={new Date()}
                 />
               </LocalizationProvider>

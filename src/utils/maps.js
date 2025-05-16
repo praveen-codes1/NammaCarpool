@@ -6,13 +6,13 @@ export const BANGALORE_BOUNDS = {
   west: 77.447774,
 };
 
-// Create autocomplete options with Bangalore restrictions
+// Create autocomplete options with Bangalore restrictions (for OSM/Leaflet, just return bounds info)
 export const createAutocompleteOptions = () => ({
-  bounds: new google.maps.LatLngBounds(
-    { lat: BANGALORE_BOUNDS.south, lng: BANGALORE_BOUNDS.west },
-    { lat: BANGALORE_BOUNDS.north, lng: BANGALORE_BOUNDS.east }
-  ),
-  componentRestrictions: { country: 'IN' },
+  bounds: [
+    [BANGALORE_BOUNDS.south, BANGALORE_BOUNDS.west],
+    [BANGALORE_BOUNDS.north, BANGALORE_BOUNDS.east]
+  ],
+  country: 'IN',
   strictBounds: true,
   types: ['geocode', 'establishment'],
 });
