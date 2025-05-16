@@ -11,7 +11,7 @@ import {
   Alert,
 } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
-import { db, requestNotificationPermission } from '../firebase';
+import { db, requestNotificationPermission } from '../config/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 
 const Register = () => {

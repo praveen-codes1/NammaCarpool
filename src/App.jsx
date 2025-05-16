@@ -12,7 +12,7 @@ import MyRides from './pages/MyRides';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { requestNotificationPermission, onForegroundMessage, handleNotification } from './utils/notifications';
 import { doc, setDoc } from 'firebase/firestore';
-import { db } from './firebase';
+import { db } from './config/firebase';
 
 // Separate component for notification handling
 const NotificationHandler = () => {

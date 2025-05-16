@@ -28,10 +28,11 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useAuth } from '../contexts/AuthContext';
-import { db } from '../firebase';
+import { db } from '../config/firebase';
 import { collection, addDoc } from 'firebase/firestore';
 import { getMapOptions, searchLocation, getRoute, formatAddress, isWithinBangalore } from '../utils/maps';
 import { handleNotification } from '../utils/notifications';
+import { configureMapIcons } from '../utils/mapIcons';
 
 // Fix Leaflet default icon issue
 delete L.Icon.Default.prototype._getIconUrl;
@@ -40,6 +41,9 @@ L.Icon.Default.mergeOptions({
   iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
+
+// Configure map icons
+configureMapIcons();
 
 const OfferRide = () => {
   const navigate = useNavigate();

@@ -14,7 +14,7 @@ import {
   Divider,
 } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
-import { db } from '../firebase';
+import { db } from '../config/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 const Profile = () => {

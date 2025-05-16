@@ -17,7 +17,7 @@ import {
 } from '@mui/material';
 import { format } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
-import { db } from '../firebase';
+import { db } from '../config/firebase';
 import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
 
 const MyRides = () => {

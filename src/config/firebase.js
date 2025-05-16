@@ -1,7 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
-import { getMessaging, getToken } from 'firebase/messaging';
+import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -9,7 +9,8 @@ const firebaseConfig = {
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
 const app = initializeApp(firebaseConfig);
@@ -17,13 +18,17 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const messaging = getMessaging(app);
 
-// Check if we're in development/test mode
-const isDevelopment = import.meta.env.MODE === 'development';
+// Only use emulators if explicitly enabled
+const useEmulators = import.meta.env.VITE_USE_FIREBASE_EMULATORS === 'true';
 
-if (isDevelopment) {
-  // Connect to Firebase emulators in development
-  connectAuthEmulator(auth, 'http://localhost:9099');
-  connectFirestoreEmulator(db, 'localhost', 8080);
+if (useEmulators) {
+  // Connect to Firebase emulators when enabled
+  const authEmulatorHost = import.meta.env.VITE_AUTH_EMULATOR_HOST || 'localhost:9099';
+  const firestoreEmulatorHost = import.meta.env.VITE_FIRESTORE_EMULATOR_HOST || 'localhost';
+  const firestoreEmulatorPort = parseInt(import.meta.env.VITE_FIRESTORE_EMULATOR_PORT || '8080');
+
+  connectAuthEmulator(auth, `http://${authEmulatorHost}`);
+  connectFirestoreEmulator(db, firestoreEmulatorHost, firestoreEmulatorPort);
   
   console.log('Using Firebase Emulators');
 }
@@ -38,11 +43,19 @@ export const requestNotificationPermission = async () => {
       });
       return token;
     }
-    return null;
+    throw new Error('Notification permission denied');
   } catch (error) {
     console.error('Error requesting notification permission:', error);
     return null;
   }
 };
+
+// Handle foreground messages
+export const onMessageListener = () =>
+  new Promise((resolve) => {
+    onMessage(messaging, (payload) => {
+      resolve(payload);
+    });
+  });
 
 export default app; 
