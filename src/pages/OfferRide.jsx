@@ -79,25 +79,53 @@ const OfferRide = () => {
 
   const handleSourceSearch = async (event, value) => {
     console.log("Source input:", value);
-    if (value.length < 3) return;
+    if (!value || typeof value !== 'string' || value.length < 3) {
+      setSourceOptions([]);
+      return;
+    }
     
     try {
+      setError('');
       const results = await searchLocation(value);
-      setSourceOptions(results);
+      console.log("Search results:", results);
+      // Make sure we've got an array
+      if (Array.isArray(results) && results.length > 0) {
+        setSourceOptions(results);
+      } else {
+        setSourceOptions([]);
+        if (value.length > 3) {
+          console.log("No results found for:", value);
+        }
+      }
     } catch (error) {
       console.error('Error searching source location:', error);
+      setSourceOptions([]);
     }
   };
 
   const handleDestinationSearch = async (event, value) => {
     console.log("Destination input:", value);
-    if (value.length < 3) return;
+    if (!value || typeof value !== 'string' || value.length < 3) {
+      setDestinationOptions([]);
+      return;
+    }
     
     try {
+      setError('');
       const results = await searchLocation(value);
-      setDestinationOptions(results);
+      console.log("Destination search results:", results);
+      // Make sure we've got an array
+      if (Array.isArray(results) && results.length > 0) {
+        setDestinationOptions(results);
+      } else {
+        setDestinationOptions([]);
+        if (value.length > 3) {
+          console.log("No results found for:", value);
+        }
+      }
     } catch (error) {
       console.error('Error searching destination location:', error);
+      setDestinationOptions([]);
     }
   };
 
@@ -107,27 +135,46 @@ const OfferRide = () => {
       setError('Please select a location from the suggestions.');
       return;
     }
+    
+    // Ensure place has necessary properties
+    if (!place.lat || !place.lng) {
+      console.error('Invalid place object:', place);
+      setError('Invalid location data. Please try again.');
+      return;
+    }
+    
     if (!isWithinBangalore(place.lat, place.lng)) {
       setError('Source location must be within Bangalore');
       return;
     }
+    
+    // Ensure location object is properly formatted
+    const formattedPlace = {
+      ...place,
+      location: {
+        lat: place.lat,
+        lng: place.lng
+      }
+    };
+    
     setFormData(prev => ({
       ...prev,
       source: place.display_name,
-      sourceDetails: place
+      sourceDetails: formattedPlace
     }));
-    if (formData.destinationDetails) {
+    
+    console.log('Source location set:', formattedPlace);
+    
+    if (formData.destinationDetails && formData.destinationDetails.location) {
       try {
         const routeResult = await getRoute(
           { lat: place.lat, lng: place.lng },
-          { 
-            lat: formData.destinationDetails.location.lat, 
-            lng: formData.destinationDetails.location.lng 
-          }
+          formData.destinationDetails.location
         );
         setRouteGeometry(routeResult.geometry);
       } catch (err) {
         console.error('Error getting route:', err);
+        // Don't show the error to the user, just log it
       }
     }
   };
@@ -138,27 +185,46 @@ const OfferRide = () => {
       setError('Please select a location from the suggestions.');
       return;
     }
+    
+    // Ensure place has necessary properties
+    if (!place.lat || !place.lng) {
+      console.error('Invalid place object:', place);
+      setError('Invalid location data. Please try again.');
+      return;
+    }
+    
     if (!isWithinBangalore(place.lat, place.lng)) {
       setError('Destination location must be within Bangalore');
       return;
     }
+    
+    // Ensure location object is properly formatted
+    const formattedPlace = {
+      ...place,
+      location: {
+        lat: place.lat,
+        lng: place.lng
+      }
+    };
+    
     setFormData(prev => ({
       ...prev,
       destination: place.display_name,
-      destinationDetails: place
+      destinationDetails: formattedPlace
     }));
-    if (formData.sourceDetails) {
+    
+    console.log('Destination location set:', formattedPlace);
+    
+    if (formData.sourceDetails && formData.sourceDetails.location) {
       try {
         const routeResult = await getRoute(
-          { 
-            lat: formData.sourceDetails.location.lat, 
-            lng: formData.sourceDetails.location.lng 
-          },
+          formData.sourceDetails.location,
           { lat: place.lat, lng: place.lng }
         );
         setRouteGeometry(routeResult.geometry);
       } catch (err) {
         console.error('Error getting route:', err);
+        // Don't show the error to the user, just log it
       }
     }
   };
@@ -187,9 +253,30 @@ const OfferRide = () => {
     try {
       setError('');
       setLoading(true);
+      console.log('Starting ride offer submission', formData);
 
+      // Validate required fields
       if (!formData.sourceDetails || !formData.destinationDetails) {
         setError('Please select valid source and destination locations');
+        setLoading(false);
+        return;
+      }
+
+      // Validate location objects
+      if (!formData.sourceDetails.location || !formData.destinationDetails.location) {
+        console.error('Invalid location objects:', {
+          source: formData.sourceDetails,
+          destination: formData.destinationDetails
+        });
+        setError('Location data is invalid. Please reselect your locations.');
+        setLoading(false);
+        return;
+      }
+
+      // Validate date and time
+      if (!formData.date || !formData.time) {
+        setError('Please select valid date and time');
+        setLoading(false);
         return;
       }
 
@@ -198,6 +285,13 @@ const OfferRide = () => {
       const timeDate = new Date(formData.time);
       rideDateTime.setHours(timeDate.getHours());
       rideDateTime.setMinutes(timeDate.getMinutes());
+
+      // Validate other required fields
+      if (!formData.seats || !formData.price || !formData.carModel || !formData.carNumber) {
+        setError('Please fill in all required fields');
+        setLoading(false);
+        return;
+      }
 
       // Create base ride document
       const rideData = {
@@ -218,34 +312,49 @@ const OfferRide = () => {
         recurringDays: isRecurring ? formData.recurringDays : null,
       };
 
+      console.log('Saving ride data to Firestore', rideData);
       // Add to Firestore
       const rideRef = await addDoc(collection(db, 'rides'), rideData);
+      console.log('Ride created with ID:', rideRef.id);
 
       // If this is an update to an existing ride, notify booked passengers
       if (formData.rideId) {
-        const bookingsQuery = query(
-          collection(db, 'bookings'),
-          where('rideId', '==', formData.rideId),
-          where('status', '==', 'active')
-        );
-        
-        const bookingsSnapshot = await getDocs(bookingsQuery);
-        bookingsSnapshot.forEach((doc) => {
-          const booking = doc.data();
-          handleNotification('RIDE_UPDATE', {
-            source: rideData.source,
-            destination: rideData.destination,
-            dateTime: rideData.dateTime,
-            passengerEmail: booking.passengerEmail
+        try {
+          const bookingsQuery = query(
+            collection(db, 'bookings'),
+            where('rideId', '==', formData.rideId),
+            where('status', '==', 'active')
+          );
+          
+          const bookingsSnapshot = await getDocs(bookingsQuery);
+          bookingsSnapshot.forEach((doc) => {
+            const booking = doc.data();
+            handleNotification('RIDE_UPDATE', {
+              source: rideData.source,
+              destination: rideData.destination,
+              dateTime: rideData.dateTime,
+              passengerEmail: booking.passengerEmail
+            });
           });
-        });
+        } catch (notifyError) {
+          console.error('Error notifying passengers:', notifyError);
+          // Don't fail the whole submission if notifications fail
+        }
       }
       
-      // Navigate to rides list
-      navigate('/my-rides');
+      // Navigate to rides list - wrap in a try-catch to prevent navigation errors
+      try {
+        console.log('Navigating to my-rides page');
+        navigate('/my-rides');
+      } catch (navError) {
+        console.error('Navigation error:', navError);
+        // If navigation fails, at least show a success message
+        setError('');
+        alert('Ride offer created successfully!');
+      }
     } catch (err) {
-      setError('Failed to create ride offer. Please try again.');
-      console.error('Error creating ride:', err);
+      console.error('Error details:', err);
+      setError('Failed to create ride offer: ' + (err.message || 'Unknown error'));
     } finally {
       setLoading(false);
     }
@@ -328,12 +437,26 @@ const OfferRide = () => {
 
               <Grid item xs={12} md={6}>
                 <Autocomplete
-                  freeSolo={false}
                   options={sourceOptions}
-                  getOptionLabel={(option) => option.display_name || ''}
-                  onInputChange={handleSourceSearch}
+                  getOptionLabel={(option) => {
+                    if (typeof option === 'string') return option;
+                    return option.display_name || '';
+                  }}
+                  inputValue={formData.source}
+                  onInputChange={(event, newInputValue) => {
+                    setFormData(prev => ({
+                      ...prev,
+                      source: newInputValue
+                    }));
+                    handleSourceSearch(event, newInputValue);
+                  }}
                   onChange={handleSourceSelect}
-                  value={formData.sourceDetails}
+                  value={formData.sourceDetails || null}
+                  isOptionEqualToValue={(option, value) => {
+                    // For OpenStreetMap results, compare unique identifiers
+                    return option && value ? option.place_id === value.place_id : false;
+                  }}
+                  noOptionsText="Type at least 3 characters to search"
                   renderInput={(params) => (
                     <TextField
                       {...params}
@@ -341,6 +464,7 @@ const OfferRide = () => {
                       fullWidth
                       required
                       placeholder="Enter pickup location"
+                      error={!!error && error.includes('source')}
                     />
                   )}
                 />
@@ -348,12 +472,26 @@ const OfferRide = () => {
 
               <Grid item xs={12} md={6}>
                 <Autocomplete
-                  freeSolo={false}
                   options={destinationOptions}
-                  getOptionLabel={(option) => option.display_name || ''}
-                  onInputChange={handleDestinationSearch}
+                  getOptionLabel={(option) => {
+                    if (typeof option === 'string') return option;
+                    return option.display_name || '';
+                  }}
+                  inputValue={formData.destination}
+                  onInputChange={(event, newInputValue) => {
+                    setFormData(prev => ({
+                      ...prev,
+                      destination: newInputValue
+                    }));
+                    handleDestinationSearch(event, newInputValue);
+                  }}
                   onChange={handleDestinationSelect}
-                  value={formData.destinationDetails}
+                  value={formData.destinationDetails || null}
+                  isOptionEqualToValue={(option, value) => {
+                    // For OpenStreetMap results, compare unique identifiers
+                    return option && value ? option.place_id === value.place_id : false;
+                  }}
+                  noOptionsText="Type at least 3 characters to search"
                   renderInput={(params) => (
                     <TextField
                       {...params}
@@ -361,6 +499,7 @@ const OfferRide = () => {
                       fullWidth
                       required
                       placeholder="Enter drop-off location"
+                      error={!!error && error.includes('destination')}
                     />
                   )}
                 />

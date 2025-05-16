@@ -31,18 +31,28 @@ export const getMapOptions = () => ({
 
 // Get route between two points using OSRM
 export const getRoute = async (origin, destination) => {
+  // Validate input parameters
+  if (!origin || !destination || !origin.lat || !origin.lng || !destination.lat || !destination.lng) {
+    console.error('Invalid parameters for getRoute:', { origin, destination });
+    throw new Error('Invalid coordinates for route calculation');
+  }
+
   try {
+    console.log('Fetching route between', origin, 'and', destination);
     const response = await fetch(
       `https://router.project-osrm.org/route/v1/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=full&geometries=geojson`
     );
 
     if (!response.ok) {
-      throw new Error('Failed to get route');
+      const errorText = await response.text();
+      console.error('Route API error:', response.status, errorText);
+      throw new Error(`Failed to get route: ${response.status}`);
     }
 
     const data = await response.json();
     
     if (!data.routes || data.routes.length === 0) {
+      console.error('No route found between points');
       throw new Error('No route found');
     }
 
@@ -63,17 +73,59 @@ export const getRoute = async (origin, destination) => {
 
 // Search location using OpenStreetMap Nominatim
 export const searchLocation = async (query) => {
+  if (!query || typeof query !== 'string' || query.length < 3) {
+    console.warn('Invalid search query:', query);
+    return [];
+  }
+
   try {
+    console.log('Searching for:', query);
     const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&bounded=1&viewbox=${BANGALORE_BOUNDS.west},${BANGALORE_BOUNDS.north},${BANGALORE_BOUNDS.east},${BANGALORE_BOUNDS.south}&countrycodes=in`
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&bounded=1&viewbox=${BANGALORE_BOUNDS.west},${BANGALORE_BOUNDS.north},${BANGALORE_BOUNDS.east},${BANGALORE_BOUNDS.south}&countrycodes=in&limit=10`,
+      {
+        headers: {
+          'User-Agent': 'NammaCarpool/1.0'
+        }
+      }
     );
     
     if (!response.ok) {
-      throw new Error('Failed to search location');
+      console.error(`Search API error: ${response.status} ${response.statusText}`);
+      throw new Error(`Failed to search location: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json();
-    return data.filter(place => isWithinBangalore(parseFloat(place.lat), parseFloat(place.lon)));
+    console.log('Raw search results:', data);
+    
+    if (!Array.isArray(data)) {
+      console.error('Invalid response format:', data);
+      return [];
+    }
+    
+    // Ensure each place has the required properties and is within Bangalore
+    const formattedResults = data
+      .filter(place => {
+        if (!place || !place.lat || !place.lon) return false;
+        const lat = parseFloat(place.lat);
+        const lng = parseFloat(place.lon);
+        return !isNaN(lat) && !isNaN(lng) && isWithinBangalore(lat, lng);
+      })
+      .map(place => ({
+        display_name: place.display_name || `Location in Bangalore`,
+        place_id: place.place_id || `place_${place.osm_id || Math.random().toString(36).substr(2, 9)}`,
+        lat: parseFloat(place.lat),
+        lng: parseFloat(place.lon),
+        location: {
+          lat: parseFloat(place.lat),
+          lng: parseFloat(place.lon)
+        },
+        address: place.address || {},
+        type: place.type || 'unknown',
+        importance: place.importance || 0
+      }));
+    
+    console.log('Formatted results:', formattedResults);
+    return formattedResults;
   } catch (error) {
     console.error('Error searching location:', error);
     return [];
@@ -82,16 +134,37 @@ export const searchLocation = async (query) => {
 
 // Format address from OpenStreetMap Nominatim response
 export const formatAddress = (place) => {
-  return {
-    location: {
-      lat: parseFloat(place.lat),
-      lng: parseFloat(place.lon || place.lng)
-    },
-    formattedAddress: place.display_name,
-    placeId: place.place_id,
-    mainText: place.display_name.split(',')[0],
-    secondaryText: place.display_name.split(',').slice(1).join(',').trim()
-  };
+  if (!place) {
+    console.error('Invalid place object provided to formatAddress');
+    return null;
+  }
+  
+  // Make sure we have the required properties
+  const lat = parseFloat(place.lat);
+  const lng = parseFloat(place.lon || place.lng);
+  
+  if (isNaN(lat) || isNaN(lng)) {
+    console.error('Invalid coordinates in place object', place);
+    return null;
+  }
+  
+  try {
+    return {
+      location: {
+        lat: lat,
+        lng: lng
+      },
+      formattedAddress: place.display_name || 'Unknown location',
+      placeId: place.place_id || `place_${Math.random().toString(36).substring(2, 9)}`,
+      mainText: place.display_name ? place.display_name.split(',')[0] : 'Unknown location',
+      secondaryText: place.display_name ? place.display_name.split(',').slice(1).join(',').trim() : 'Bangalore',
+      // Include the original properties to ensure compatibility
+      ...place
+    };
+  } catch (error) {
+    console.error('Error formatting address:', error, place);
+    return null;
+  }
 };
 
 // Check if coordinates are within Bangalore bounds

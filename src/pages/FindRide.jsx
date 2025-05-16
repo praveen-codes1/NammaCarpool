@@ -32,7 +32,7 @@ import 'leaflet/dist/leaflet.css';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../config/firebase';
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, getDoc } from 'firebase/firestore';
-import { createAutocompleteOptions, getMapOptions, getRoute, formatAddress, isWithinBangalore } from '../utils/maps';
+import { createAutocompleteOptions, getMapOptions, getRoute, formatAddress, isWithinBangalore, searchLocation } from '../utils/maps';
 import { handleNotification } from '../utils/notifications';
 import { configureMapIcons } from '../utils/mapIcons';
 
@@ -75,23 +75,53 @@ const FindRide = () => {
 
   const handleSourceSearch = async (event, value) => {
     console.log("Source input:", value);
-    if (value.length < 3) return;
+    if (!value || typeof value !== 'string' || value.length < 3) {
+      setSourceOptions([]);
+      return;
+    }
+    
     try {
+      setError('');
       const results = await searchLocation(value);
-      setSourceOptions(results);
+      console.log("Search results:", results);
+      // Make sure we've got an array
+      if (Array.isArray(results) && results.length > 0) {
+        setSourceOptions(results);
+      } else {
+        setSourceOptions([]);
+        if (value.length > 3) {
+          console.log("No results found for:", value);
+        }
+      }
     } catch (error) {
       console.error('Error searching source location:', error);
+      setSourceOptions([]);
     }
   };
 
   const handleDestinationSearch = async (event, value) => {
     console.log("Destination input:", value);
-    if (value.length < 3) return;
+    if (!value || typeof value !== 'string' || value.length < 3) {
+      setDestinationOptions([]);
+      return;
+    }
+    
     try {
+      setError('');
       const results = await searchLocation(value);
-      setDestinationOptions(results);
+      console.log("Destination search results:", results);
+      // Make sure we've got an array
+      if (Array.isArray(results) && results.length > 0) {
+        setDestinationOptions(results);
+      } else {
+        setDestinationOptions([]);
+        if (value.length > 3) {
+          console.log("No results found for:", value);
+        }
+      }
     } catch (error) {
       console.error('Error searching destination location:', error);
+      setDestinationOptions([]);
     }
   };
 
@@ -101,16 +131,37 @@ const FindRide = () => {
       setError('Please select a location from the suggestions.');
       return;
     }
+    
+    // Ensure place has necessary properties
+    if (!place.lat || !place.lng) {
+      console.error('Invalid place object:', place);
+      setError('Invalid location data. Please try again.');
+      return;
+    }
+    
     if (!isWithinBangalore(place.lat, place.lng)) {
       setError('Source location must be within Bangalore');
       return;
     }
+    
+    // Ensure location object is properly formatted
+    const formattedPlace = {
+      ...place,
+      location: {
+        lat: place.lat,
+        lng: place.lng
+      }
+    };
+    
     setSearchData(prev => ({
       ...prev,
       source: place.display_name,
-      sourceDetails: place
+      sourceDetails: formattedPlace
     }));
-    if (searchData.destinationDetails) {
+    
+    console.log('Source location set:', formattedPlace);
+    
+    if (searchData.destinationDetails && searchData.destinationDetails.location) {
       try {
         const routeResult = await getRoute(
           { lat: place.lat, lng: place.lng },
@@ -119,6 +170,7 @@ const FindRide = () => {
         setRouteGeometry(routeResult.geometry);
       } catch (err) {
         console.error('Error getting route:', err);
+        // Don't show the error to the user, just log it
       }
     }
   };
@@ -129,16 +181,37 @@ const FindRide = () => {
       setError('Please select a location from the suggestions.');
       return;
     }
+    
+    // Ensure place has necessary properties
+    if (!place.lat || !place.lng) {
+      console.error('Invalid place object:', place);
+      setError('Invalid location data. Please try again.');
+      return;
+    }
+    
     if (!isWithinBangalore(place.lat, place.lng)) {
       setError('Destination location must be within Bangalore');
       return;
     }
+    
+    // Ensure location object is properly formatted
+    const formattedPlace = {
+      ...place,
+      location: {
+        lat: place.lat,
+        lng: place.lng
+      }
+    };
+    
     setSearchData(prev => ({
       ...prev,
       destination: place.display_name,
-      destinationDetails: place
+      destinationDetails: formattedPlace
     }));
-    if (searchData.sourceDetails) {
+    
+    console.log('Destination location set:', formattedPlace);
+    
+    if (searchData.sourceDetails && searchData.sourceDetails.location) {
       try {
         const routeResult = await getRoute(
           searchData.sourceDetails.location,
@@ -147,6 +220,7 @@ const FindRide = () => {
         setRouteGeometry(routeResult.geometry);
       } catch (err) {
         console.error('Error getting route:', err);
+        // Don't show the error to the user, just log it
       }
     }
   };
@@ -170,9 +244,22 @@ const FindRide = () => {
     try {
       setError('');
       setLoading(true);
+      console.log('Starting search with data:', searchData);
       
       if (!searchData.sourceDetails || !searchData.destinationDetails) {
         setError('Please select valid source and destination locations');
+        setLoading(false);
+        return;
+      }
+
+      // Check if locations have valid coordinates
+      if (!searchData.sourceDetails.location || !searchData.destinationDetails.location) {
+        console.error('Invalid location objects:', {
+          source: searchData.sourceDetails,
+          destination: searchData.destinationDetails
+        });
+        setError('Location data is invalid. Please reselect your locations.');
+        setLoading(false);
         return;
       }
 
@@ -195,39 +282,53 @@ const FindRide = () => {
         ridesQuery = query(ridesQuery, where('status', '==', 'active'));
       }
       
+      console.log('Executing Firestore query');
       // Execute query
       const querySnapshot = await getDocs(ridesQuery);
+      console.log('Query completed, processing results');
       
       // Process results
       const rides = [];
       querySnapshot.forEach((doc) => {
-        const rideData = doc.data();
-        
-        // Calculate distance between search points and ride points
-        const sourceDistance = calculateDistance(
-          searchData.sourceDetails.location,
-          rideData.sourceLocation
-        );
-        
-        const destinationDistance = calculateDistance(
-          searchData.destinationDetails.location,
-          rideData.destinationLocation
-        );
-        
-        // Filter rides within 2km radius of search points
-        if (sourceDistance <= 2000 && destinationDistance <= 2000) {
-          rides.push({
-            id: doc.id,
-            ...rideData,
-          });
+        try {
+          const rideData = doc.data();
+          
+          // Validate ride data has required location properties
+          if (!rideData.sourceLocation || !rideData.destinationLocation) {
+            console.warn('Skipping ride with invalid location data:', doc.id);
+            return;
+          }
+          
+          // Calculate distance between search points and ride points
+          const sourceDistance = calculateDistance(
+            searchData.sourceDetails.location,
+            rideData.sourceLocation
+          );
+          
+          const destinationDistance = calculateDistance(
+            searchData.destinationDetails.location,
+            rideData.destinationLocation
+          );
+          
+          // Filter rides within 2km radius of search points
+          if (sourceDistance <= 2000 && destinationDistance <= 2000) {
+            rides.push({
+              id: doc.id,
+              ...rideData,
+            });
+          }
+        } catch (itemError) {
+          console.error('Error processing ride item:', itemError);
         }
       });
       
+      console.log('Found matching rides:', rides.length);
       setSearchResults(rides);
 
       // Show route on map if results found
       if (rides.length > 0) {
         try {
+          console.log('Fetching route between points');
           const routeResult = await getRoute(
             searchData.sourceDetails.location,
             searchData.destinationDetails.location
@@ -235,11 +336,12 @@ const FindRide = () => {
           setRouteGeometry(routeResult.geometry);
         } catch (err) {
           console.error('Error getting route:', err);
+          // Don't fail completely if route fetching fails
         }
       }
     } catch (err) {
-      setError('Failed to search for rides. Please try again.');
-      console.error('Error searching rides:', err);
+      console.error('Search error details:', err);
+      setError('Failed to search for rides: ' + (err.message || 'Unknown error'));
     } finally {
       setLoading(false);
     }
@@ -319,91 +421,73 @@ const FindRide = () => {
   }
 
   return (
-    <Container maxWidth="md">
-      <Box sx={{ mt: 4 }}>
-        <Paper sx={{ p: 4, mb: 4 }}>
-          <Typography variant="h4" gutterBottom>
-            Find a Ride
-          </Typography>
-
-          {error && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {error}
-            </Alert>
-          )}
-
+    <Container maxWidth="lg" sx={{ py: 4 }}>
+      <Paper elevation={3} sx={{ p: 3, mb: 4 }}>
+        <Typography variant="h5" gutterBottom>Find a Ride</Typography>
+        
+        {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
+        
+        <Box component="form" noValidate>
           <Grid container spacing={3}>
-            {/* Map Display */}
-            <Grid item xs={12}>
-              <Box sx={{ height: '300px', width: '100%', mb: 3 }}>
-                <MapContainer
-                  {...getMapOptions()}
-                  style={{ height: '100%', width: '100%' }}
-                >
-                  <TileLayer
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                  />
-                  {routeGeometry && (
-                    <GeoJSON data={routeGeometry} style={{ color: '#0066ff', weight: 4 }} />
-                  )}
-                  {searchResults.map((ride) => (
-                    <Marker
-                      key={ride.id}
-                      position={[ride.sourceLocation.lat, ride.sourceLocation.lng]}
-                    >
-                      <Popup>
-                        <Typography variant="subtitle2">Pickup: {ride.source}</Typography>
-                        <Typography variant="body2">
-                          Available seats: {ride.seats}<br />
-                          Price: ₹{ride.price} per seat
-                        </Typography>
-                      </Popup>
-                    </Marker>
-                  ))}
-                </MapContainer>
-              </Box>
-            </Grid>
-
-            <Grid item xs={12} md={4}>
+            <Grid item xs={12} md={5}>
               <Autocomplete
-                freeSolo={false}
+                id="source-autocomplete"
+                freeSolo
                 options={sourceOptions}
-                getOptionLabel={(option) => option.display_name || ''}
-                onInputChange={handleSourceSearch}
+                getOptionLabel={(option) => typeof option === 'string' ? option : option.display_name || ''}
+                inputValue={searchData.source}
+                onInputChange={(event, newInputValue) => {
+                  setSearchData(prev => ({
+                    ...prev,
+                    source: newInputValue
+                  }));
+                  handleSourceSearch(event, newInputValue);
+                }}
                 onChange={handleSourceSelect}
-                value={searchData.sourceDetails}
                 renderInput={(params) => (
                   <TextField
                     {...params}
-                    label="From"
+                    label="Source Location"
+                    required
                     fullWidth
-                    placeholder="Enter pickup location"
+                    variant="outlined"
+                    placeholder="Enter source location"
+                    error={!searchData.sourceDetails && searchData.source.length > 0}
+                    helperText={!searchData.sourceDetails && searchData.source.length > 0 ? "Please select a location from the dropdown" : ""}
                   />
                 )}
               />
             </Grid>
-
-            <Grid item xs={12} md={4}>
+            <Grid item xs={12} md={5}>
               <Autocomplete
-                freeSolo={false}
+                id="destination-autocomplete"
+                freeSolo
                 options={destinationOptions}
-                getOptionLabel={(option) => option.display_name || ''}
-                onInputChange={handleDestinationSearch}
+                getOptionLabel={(option) => typeof option === 'string' ? option : option.display_name || ''}
+                inputValue={searchData.destination}
+                onInputChange={(event, newInputValue) => {
+                  setSearchData(prev => ({
+                    ...prev,
+                    destination: newInputValue
+                  }));
+                  handleDestinationSearch(event, newInputValue);
+                }}
                 onChange={handleDestinationSelect}
-                value={searchData.destinationDetails}
                 renderInput={(params) => (
                   <TextField
                     {...params}
-                    label="To"
+                    label="Destination Location"
+                    required
                     fullWidth
-                    placeholder="Enter drop-off location"
+                    variant="outlined"
+                    placeholder="Enter destination location"
+                    error={!searchData.destinationDetails && searchData.destination.length > 0}
+                    helperText={!searchData.destinationDetails && searchData.destination.length > 0 ? "Please select a location from the dropdown" : ""}
                   />
                 )}
               />
             </Grid>
-
-            <Grid item xs={12} md={4}>
+            <Grid item xs={12} md={2}>
               <LocalizationProvider dateAdapter={AdapterDateFns}>
                 <DatePicker
                   label="Date"
@@ -414,7 +498,6 @@ const FindRide = () => {
                 />
               </LocalizationProvider>
             </Grid>
-
             <Grid item xs={12}>
               <Button
                 variant="contained"
@@ -428,6 +511,43 @@ const FindRide = () => {
               </Button>
             </Grid>
           </Grid>
+        </Box>
+      </Paper>
+
+      {/* Map Display */}
+      <Box sx={{ mt: 4 }}>
+        <Paper sx={{ p: 4, mb: 4 }}>
+          <Typography variant="h4" gutterBottom>
+            Available Rides
+          </Typography>
+          <Box sx={{ height: '300px', width: '100%', mb: 3 }}>
+            <MapContainer
+              {...getMapOptions()}
+              style={{ height: '100%', width: '100%' }}
+            >
+              <TileLayer
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+              />
+              {routeGeometry && (
+                <GeoJSON data={routeGeometry} style={{ color: '#0066ff', weight: 4 }} />
+              )}
+              {searchResults.map((ride) => (
+                <Marker
+                  key={ride.id}
+                  position={[ride.sourceLocation.lat, ride.sourceLocation.lng]}
+                >
+                  <Popup>
+                    <Typography variant="subtitle2">Pickup: {ride.source}</Typography>
+                    <Typography variant="body2">
+                      Available seats: {ride.seats}<br />
+                      Price: ₹{ride.price} per seat
+                    </Typography>
+                  </Popup>
+                </Marker>
+              ))}
+            </MapContainer>
+          </Box>
         </Paper>
 
         {/* Search Results */}

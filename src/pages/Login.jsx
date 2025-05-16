@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
   Container,
@@ -14,22 +14,37 @@ import { useAuth } from '../contexts/AuthContext';
 
 const Login = () => {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, error: authError, clearError } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  // Clear errors when component unmounts or when inputs change
+  useEffect(() => {
+    return () => {
+      clearError();
+      setError('');
+    };
+  }, [clearError, email, password]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     
+    // Validation
+    if (!email || !password) {
+      setError('Please fill in all fields');
+      return;
+    }
+
     try {
       setError('');
       setLoading(true);
       await login(email, password);
       navigate('/');
     } catch (err) {
-      setError('Failed to sign in. Please check your credentials.');
+      // Use auth context error or set local error
+      setError(authError || 'Failed to login. Please check your credentials.');
     } finally {
       setLoading(false);
     }

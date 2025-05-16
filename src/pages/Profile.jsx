@@ -19,12 +19,11 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 const Profile = () => {
   const navigate = useNavigate();
-  const { currentUser, logout } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const { currentUser, userProfile, updateProfile, error: authError, clearError } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  const [profileData, setProfileData] = useState({
+  const [formData, setFormData] = useState({
     fullName: '',
     phone: '',
     gender: '',
@@ -35,36 +34,34 @@ const Profile = () => {
     preferredDropLocations: '',
   });
 
+  // Load user profile data when available
   useEffect(() => {
-    if (!currentUser) {
-      navigate('/login');
-      return;
+    if (userProfile) {
+      setFormData({
+        fullName: userProfile.fullName || '',
+        phone: userProfile.phone || '',
+        gender: userProfile.gender || '',
+        age: userProfile.age || '',
+        address: userProfile.address || '',
+        emergencyContact: userProfile.emergencyContact || '',
+        preferredPickupLocations: userProfile.preferredPickupLocations || '',
+        preferredDropLocations: userProfile.preferredDropLocations || '',
+      });
     }
+  }, [userProfile]);
 
-    const fetchProfile = async () => {
-      try {
-        const profileDoc = await getDoc(doc(db, 'users', currentUser.uid));
-        if (profileDoc.exists()) {
-          const data = profileDoc.data();
-          setProfileData(prevData => ({
-            ...prevData,
-            ...data
-          }));
-        }
-      } catch (err) {
-        console.error('Error fetching profile:', err);
-        setError('Failed to load profile data');
-      } finally {
-        setLoading(false);
-      }
+  // Clear messages when component unmounts
+  useEffect(() => {
+    return () => {
+      clearError();
+      setError('');
+      setSuccess(false);
     };
-
-    fetchProfile();
-  }, [currentUser, navigate]);
+  }, [clearError]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setProfileData(prev => ({
+    setFormData(prev => ({
       ...prev,
       [name]: value
     }));
@@ -72,34 +69,50 @@ const Profile = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Simple validation
+    if (!formData.fullName || !formData.phone) {
+      setError('Name and phone number are required');
+      return;
+    }
+
     try {
-      setSaving(true);
       setError('');
-      setSuccess('');
-
-      // Validate required fields
-      if (!profileData.fullName || !profileData.phone) {
-        setError('Name and phone number are required');
-        return;
-      }
-
-      await setDoc(doc(db, 'users', currentUser.uid), {
-        ...profileData,
-        email: currentUser.email,
-        updatedAt: new Date(),
-      }, { merge: true });
-
-      setSuccess('Profile updated successfully!');
+      setSuccess(false);
+      setLoading(true);
+      
+      await updateProfile(formData);
+      
+      setSuccess(true);
+      // Auto-hide success message after 3 seconds
+      setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
-      console.error('Error updating profile:', err);
-      setError('Failed to update profile');
+      setError(authError || 'Failed to update profile');
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   };
 
+  // If not logged in, redirect to login
   if (!currentUser) {
-    return null;
+    return (
+      <Container maxWidth="sm">
+        <Box sx={{ mt: 4 }}>
+          <Paper sx={{ p: 4, textAlign: 'center' }}>
+            <Typography variant="h5" gutterBottom>
+              Please login to view your profile
+            </Typography>
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={() => navigate('/login')}
+            >
+              Login
+            </Button>
+          </Paper>
+        </Box>
+      </Container>
+    );
   }
 
   if (loading) {
@@ -119,7 +132,7 @@ const Profile = () => {
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
             <Avatar
               sx={{ width: 64, height: 64, mr: 2 }}
-              alt={profileData.fullName || currentUser.email}
+              alt={formData.fullName || currentUser.email}
               src="/default-avatar.png"
             />
             <Typography variant="h4">
@@ -135,7 +148,7 @@ const Profile = () => {
 
           {success && (
             <Alert severity="success" sx={{ mb: 2 }}>
-              {success}
+              Profile updated successfully!
             </Alert>
           )}
 
@@ -146,7 +159,7 @@ const Profile = () => {
                   name="fullName"
                   label="Full Name"
                   fullWidth
-                  value={profileData.fullName}
+                  value={formData.fullName}
                   onChange={handleChange}
                 />
               </Grid>
@@ -155,7 +168,7 @@ const Profile = () => {
                   name="phone"
                   label="Phone Number"
                   fullWidth
-                  value={profileData.phone}
+                  value={formData.phone}
                   onChange={handleChange}
                 />
               </Grid>
@@ -164,7 +177,7 @@ const Profile = () => {
                   name="gender"
                   label="Gender"
                   fullWidth
-                  value={profileData.gender}
+                  value={formData.gender}
                   onChange={handleChange}
                   select
                   SelectProps={{ native: true }}
@@ -181,7 +194,7 @@ const Profile = () => {
                   label="Age"
                   type="number"
                   fullWidth
-                  value={profileData.age}
+                  value={formData.age}
                   onChange={handleChange}
                 />
               </Grid>
@@ -192,7 +205,7 @@ const Profile = () => {
                   fullWidth
                   multiline
                   rows={2}
-                  value={profileData.address}
+                  value={formData.address}
                   onChange={handleChange}
                 />
               </Grid>
@@ -201,7 +214,7 @@ const Profile = () => {
                   name="emergencyContact"
                   label="Emergency Contact"
                   fullWidth
-                  value={profileData.emergencyContact}
+                  value={formData.emergencyContact}
                   onChange={handleChange}
                 />
               </Grid>
@@ -220,7 +233,7 @@ const Profile = () => {
                   fullWidth
                   multiline
                   rows={2}
-                  value={profileData.preferredPickupLocations}
+                  value={formData.preferredPickupLocations}
                   onChange={handleChange}
                   placeholder="Enter common pickup locations (comma separated)"
                 />
@@ -232,7 +245,7 @@ const Profile = () => {
                   fullWidth
                   multiline
                   rows={2}
-                  value={profileData.preferredDropLocations}
+                  value={formData.preferredDropLocations}
                   onChange={handleChange}
                   placeholder="Enter common drop locations (comma separated)"
                 />
@@ -244,16 +257,9 @@ const Profile = () => {
                     type="submit"
                     variant="contained"
                     color="primary"
-                    disabled={saving}
+                    disabled={loading}
                   >
-                    {saving ? 'Saving...' : 'Save Profile'}
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    color="error"
-                    onClick={logout}
-                  >
-                    Sign Out
+                    {loading ? 'Saving...' : 'Save Profile'}
                   </Button>
                 </Box>
               </Grid>

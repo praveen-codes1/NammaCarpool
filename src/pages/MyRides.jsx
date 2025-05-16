@@ -18,7 +18,7 @@ import {
 import { format } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../config/firebase';
-import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc, getDoc } from 'firebase/firestore';
 
 const MyRides = () => {
   const { currentUser } = useAuth();
@@ -59,7 +59,7 @@ const MyRides = () => {
       
       for (const bookingDoc of bookedSnapshot.docs) {
         const bookingData = bookingDoc.data();
-        const rideDoc = await getDocs(doc(db, 'rides', bookingData.rideId));
+        const rideDoc = await getDoc(doc(db, 'rides', bookingData.rideId));
         if (rideDoc.exists()) {
           bookedData.push({
             bookingId: bookingDoc.id,
