@@ -17,17 +17,16 @@ import { db } from './config/firebase';
 // Separate component for notification handling
 const NotificationHandler = () => {
   const { currentUser } = useAuth();
-  const [notificationError, setNotificationError] = useState(null);
   const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
-  const [snackbarOpen, setSnackbarOpen] = useState(false);
 
   // Only prompt for notification permission after user has been active
   useEffect(() => {
     if (currentUser) {
-      // Wait until user has been active for a while
+      // Wait until user has been active for a while 
+      // Increased to 60 seconds to reduce interruptions
       const timer = setTimeout(() => {
         setShowNotificationPrompt(true);
-      }, 30000); // 30 seconds
+      }, 60000); // 60 seconds
       
       return () => clearTimeout(timer);
     }
@@ -38,27 +37,22 @@ const NotificationHandler = () => {
       if (currentUser && showNotificationPrompt) {
         const fcmToken = await requestNotificationPermission();
         
-        // Store the FCM token in Firestore
         if (fcmToken) {
+          // Store the token only if we got one (even if it's a dummy)
           await setDoc(doc(db, 'users', currentUser.uid), {
             fcmToken,
             email: currentUser.email,
             updatedAt: new Date()
           }, { merge: true });
-
-          // Setup foreground message handler
-          onForegroundMessage((payload) => {
-            const { notification } = payload;
-            handleNotification(notification.type, notification.data);
-          });
-          
-          setShowNotificationPrompt(false);
         }
+        
+        // No matter what happens, don't show the prompt again for this session
+        setShowNotificationPrompt(false);
       }
     } catch (error) {
-      console.error('Error initializing notifications:', error);
-      setNotificationError(error.message || 'Failed to initialize notifications');
-      setSnackbarOpen(true);
+      // Just log the error but don't show anything to the user
+      console.log('Notification setup issue:', error);
+      setShowNotificationPrompt(false);
     }
   };
 
@@ -69,24 +63,8 @@ const NotificationHandler = () => {
     }
   }, [showNotificationPrompt]);
 
-  const handleCloseSnackbar = () => {
-    setSnackbarOpen(false);
-  };
-
-  return (
-    <>
-      <Snackbar 
-        open={snackbarOpen} 
-        autoHideDuration={6000} 
-        onClose={handleCloseSnackbar}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert onClose={handleCloseSnackbar} severity="error">
-          {notificationError}
-        </Alert>
-      </Snackbar>
-    </>
-  );
+  // No visual elements - just handle permissions in the background
+  return null;
 };
 
 function App() {

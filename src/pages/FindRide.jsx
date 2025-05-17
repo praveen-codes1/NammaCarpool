@@ -127,101 +127,153 @@ const FindRide = () => {
 
   const handleSourceSelect = async (event, place) => {
     console.log("Selected source place:", place);
+    
+    // If no place selected, do nothing but don't show error
     if (!place || typeof place !== 'object') {
-      setError('Please select a location from the suggestions.');
       return;
     }
     
-    // Ensure place has necessary properties
-    if (!place.lat || !place.lng) {
-      console.error('Invalid place object:', place);
-      setError('Invalid location data. Please try again.');
-      return;
-    }
-    
-    if (!isWithinBangalore(place.lat, place.lng)) {
-      setError('Source location must be within Bangalore');
-      return;
-    }
-    
-    // Ensure location object is properly formatted
-    const formattedPlace = {
-      ...place,
-      location: {
-        lat: place.lat,
-        lng: place.lng
+    try {
+      // Clear any previous errors
+      setError('');
+      
+      // Ensure place has necessary properties
+      if (!place.lat || !place.lng) {
+        console.error('Invalid place object:', place);
+        setError('Invalid location data. Please try again.');
+        return;
       }
-    };
-    
-    setSearchData(prev => ({
-      ...prev,
-      source: place.display_name,
-      sourceDetails: formattedPlace
-    }));
-    
-    console.log('Source location set:', formattedPlace);
-    
-    if (searchData.destinationDetails && searchData.destinationDetails.location) {
-      try {
-        const routeResult = await getRoute(
-          { lat: place.lat, lng: place.lng },
-          searchData.destinationDetails.location
-        );
-        setRouteGeometry(routeResult.geometry);
-      } catch (err) {
-        console.error('Error getting route:', err);
-        // Don't show the error to the user, just log it
+      
+      if (!isWithinBangalore(place.lat, place.lng)) {
+        setError('Source location must be within Bangalore');
+        return;
       }
+      
+      // Ensure location object is properly formatted
+      const formattedPlace = {
+        ...place,
+        location: {
+          lat: place.lat,
+          lng: place.lng
+        }
+      };
+      
+      // Update form data with the new source
+      setSearchData(prev => ({
+        ...prev,
+        source: place.display_name,
+        sourceDetails: formattedPlace
+      }));
+      
+      console.log('Source location set:', formattedPlace);
+      
+      // Only try to get route if we have both source and destination
+      if (searchData.destinationDetails && searchData.destinationDetails.location) {
+        try {
+          // Show loading state while fetching route
+          setLoading(true);
+          
+          const routeResult = await getRoute(
+            { lat: place.lat, lng: place.lng },
+            searchData.destinationDetails.location
+          );
+          
+          // Only set route geometry if we got valid data
+          if (routeResult && routeResult.geometry) {
+            setRouteGeometry(routeResult.geometry);
+          } else {
+            // Clear route geometry if no valid data
+            setRouteGeometry(null);
+            console.log('No valid route data received');
+          }
+        } catch (err) {
+          console.error('Error getting route:', err);
+          setRouteGeometry(null);
+        } finally {
+          setLoading(false);
+        }
+      }
+    } catch (error) {
+      console.error('Error in handleSourceSelect:', error);
+      // Don't show errors to the user for a smoother experience
+      setRouteGeometry(null);
+      setLoading(false);
     }
   };
 
   const handleDestinationSelect = async (event, place) => {
     console.log("Selected destination place:", place);
+    
+    // If no place selected, do nothing but don't show error
     if (!place || typeof place !== 'object') {
-      setError('Please select a location from the suggestions.');
       return;
     }
     
-    // Ensure place has necessary properties
-    if (!place.lat || !place.lng) {
-      console.error('Invalid place object:', place);
-      setError('Invalid location data. Please try again.');
-      return;
-    }
-    
-    if (!isWithinBangalore(place.lat, place.lng)) {
-      setError('Destination location must be within Bangalore');
-      return;
-    }
-    
-    // Ensure location object is properly formatted
-    const formattedPlace = {
-      ...place,
-      location: {
-        lat: place.lat,
-        lng: place.lng
+    try {
+      // Clear any previous errors
+      setError('');
+      
+      // Ensure place has necessary properties
+      if (!place.lat || !place.lng) {
+        console.error('Invalid place object:', place);
+        setError('Invalid location data. Please try again.');
+        return;
       }
-    };
-    
-    setSearchData(prev => ({
-      ...prev,
-      destination: place.display_name,
-      destinationDetails: formattedPlace
-    }));
-    
-    console.log('Destination location set:', formattedPlace);
-    
-    if (searchData.sourceDetails && searchData.sourceDetails.location) {
-      try {
-        const routeResult = await getRoute(
-          searchData.sourceDetails.location,
-          { lat: place.lat, lng: place.lng }
-        );
-        setRouteGeometry(routeResult.geometry);
-      } catch (err) {
-        console.error('Error getting route:', err);
-        // Don't show the error to the user, just log it
+      
+      if (!isWithinBangalore(place.lat, place.lng)) {
+        setError('Destination location must be within Bangalore');
+        return;
       }
+      
+      // Ensure location object is properly formatted
+      const formattedPlace = {
+        ...place,
+        location: {
+          lat: place.lat,
+          lng: place.lng
+        }
+      };
+      
+      // Update form data with the new destination
+      setSearchData(prev => ({
+        ...prev,
+        destination: place.display_name,
+        destinationDetails: formattedPlace
+      }));
+      
+      console.log('Destination location set:', formattedPlace);
+      
+      // Only try to get route if we have both source and destination
+      if (searchData.sourceDetails && searchData.sourceDetails.location) {
+        try {
+          // Show loading state while fetching route
+          setLoading(true);
+          
+          const routeResult = await getRoute(
+            searchData.sourceDetails.location,
+            { lat: place.lat, lng: place.lng }
+          );
+          
+          // Only set route geometry if we got valid data
+          if (routeResult && routeResult.geometry) {
+            setRouteGeometry(routeResult.geometry);
+          } else {
+            // Clear route geometry if no valid data
+            setRouteGeometry(null);
+            console.log('No valid route data received');
+          }
+        } catch (err) {
+          console.error('Error getting route:', err);
+          setRouteGeometry(null);
+        } finally {
+          setLoading(false);
+        }
+      }
+    } catch (error) {
+      console.error('Error in handleDestinationSelect:', error);
+      // Don't show errors to the user for a smoother experience
+      setRouteGeometry(null);
+      setLoading(false);
     }
   };
 
@@ -409,6 +461,129 @@ const FindRide = () => {
     }
   };
 
+  // Safe map view component to prevent crashes
+  const MapView = ({ searchResults, routeGeometry }) => {
+    const [mapError, setMapError] = useState(false);
+
+    // Safe render for GeoJSON to prevent crash
+    const renderGeoJSON = () => {
+      try {
+        if (!routeGeometry || !routeGeometry.geometry) {
+          return null;
+        }
+        
+        // Generate random key to ensure re-render on changes
+        const key = Math.random().toString(36).substring(7);
+        
+        return (
+          <GeoJSON 
+            key={key} 
+            data={routeGeometry} 
+            style={{ color: '#0066ff', weight: 4 }} 
+          />
+        );
+      } catch (error) {
+        console.error("Error rendering GeoJSON:", error);
+        return null;
+      }
+    };
+
+    // Safe render for markers
+    const renderMarkers = () => {
+      try {
+        if (!searchResults || !Array.isArray(searchResults)) return null;
+        
+        return searchResults.map((ride) => {
+          if (!ride || !ride.sourceLocation || !ride.sourceLocation.lat) return null;
+          
+          return (
+            <Marker
+              key={ride.id || Math.random().toString()}
+              position={[ride.sourceLocation.lat, ride.sourceLocation.lng]}
+            >
+              <Popup>
+                <Typography variant="subtitle2">Pickup: {ride.source}</Typography>
+                <Typography variant="body2">
+                  Available seats: {ride.seats}<br />
+                  Price: ₹{ride.price} per seat
+                </Typography>
+              </Popup>
+            </Marker>
+          );
+        });
+      } catch (error) {
+        console.error("Error rendering markers:", error);
+        return null;
+      }
+    };
+
+    // Handle map error
+    if (mapError) {
+      return (
+        <Box 
+          sx={{ 
+            height: '100%', 
+            width: '100%', 
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            bgcolor: '#f5f5f5',
+            border: '1px solid #e0e0e0',
+            borderRadius: 1
+          }}
+        >
+          <Typography color="error">
+            Map could not be loaded. Please refresh the page.
+          </Typography>
+        </Box>
+      );
+    }
+
+    try {
+      return (
+        <div style={{ height: '100%', width: '100%' }}>
+          <MapContainer
+            {...getMapOptions()}
+            style={{ height: '100%', width: '100%' }}
+            whenReady={() => console.log("Map is ready")}
+            onError={(e) => {
+              console.error("Map error:", e);
+              setMapError(true);
+            }}
+          >
+            <TileLayer
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            />
+            {renderGeoJSON()}
+            {renderMarkers()}
+          </MapContainer>
+        </div>
+      );
+    } catch (error) {
+      console.error("Fatal map rendering error:", error);
+      setMapError(true);
+      return (
+        <Box 
+          sx={{ 
+            height: '100%', 
+            width: '100%', 
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            bgcolor: '#f5f5f5',
+            border: '1px solid #e0e0e0',
+            borderRadius: 1
+          }}
+        >
+          <Typography color="error">
+            Map could not be loaded due to an error.
+          </Typography>
+        </Box>
+      );
+    }
+  };
+
   if (!mapsLoaded) {
     return (
       <Container maxWidth="sm">
@@ -432,7 +607,6 @@ const FindRide = () => {
             <Grid item xs={12} md={5}>
               <Autocomplete
                 id="source-autocomplete"
-                freeSolo
                 options={sourceOptions}
                 getOptionLabel={(option) => typeof option === 'string' ? option : option.display_name || ''}
                 inputValue={searchData.source}
@@ -444,6 +618,11 @@ const FindRide = () => {
                   handleSourceSearch(event, newInputValue);
                 }}
                 onChange={handleSourceSelect}
+                value={searchData.sourceDetails || null}
+                isOptionEqualToValue={(option, value) => {
+                  return option && value ? option.place_id === value.place_id : false;
+                }}
+                noOptionsText="Type at least 3 characters to search"
                 renderInput={(params) => (
                   <TextField
                     {...params}
@@ -452,7 +631,7 @@ const FindRide = () => {
                     fullWidth
                     variant="outlined"
                     placeholder="Enter source location"
-                    error={!searchData.sourceDetails && searchData.source.length > 0}
+                    error={!!error && error.includes('source')}
                     helperText={!searchData.sourceDetails && searchData.source.length > 0 ? "Please select a location from the dropdown" : ""}
                   />
                 )}
@@ -461,7 +640,6 @@ const FindRide = () => {
             <Grid item xs={12} md={5}>
               <Autocomplete
                 id="destination-autocomplete"
-                freeSolo
                 options={destinationOptions}
                 getOptionLabel={(option) => typeof option === 'string' ? option : option.display_name || ''}
                 inputValue={searchData.destination}
@@ -473,6 +651,11 @@ const FindRide = () => {
                   handleDestinationSearch(event, newInputValue);
                 }}
                 onChange={handleDestinationSelect}
+                value={searchData.destinationDetails || null}
+                isOptionEqualToValue={(option, value) => {
+                  return option && value ? option.place_id === value.place_id : false;
+                }}
+                noOptionsText="Type at least 3 characters to search"
                 renderInput={(params) => (
                   <TextField
                     {...params}
@@ -481,7 +664,7 @@ const FindRide = () => {
                     fullWidth
                     variant="outlined"
                     placeholder="Enter destination location"
-                    error={!searchData.destinationDetails && searchData.destination.length > 0}
+                    error={!!error && error.includes('destination')}
                     helperText={!searchData.destinationDetails && searchData.destination.length > 0 ? "Please select a location from the dropdown" : ""}
                   />
                 )}
@@ -521,32 +704,7 @@ const FindRide = () => {
             Available Rides
           </Typography>
           <Box sx={{ height: '300px', width: '100%', mb: 3 }}>
-            <MapContainer
-              {...getMapOptions()}
-              style={{ height: '100%', width: '100%' }}
-            >
-              <TileLayer
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              />
-              {routeGeometry && (
-                <GeoJSON data={routeGeometry} style={{ color: '#0066ff', weight: 4 }} />
-              )}
-              {searchResults.map((ride) => (
-                <Marker
-                  key={ride.id}
-                  position={[ride.sourceLocation.lat, ride.sourceLocation.lng]}
-                >
-                  <Popup>
-                    <Typography variant="subtitle2">Pickup: {ride.source}</Typography>
-                    <Typography variant="body2">
-                      Available seats: {ride.seats}<br />
-                      Price: ₹{ride.price} per seat
-                    </Typography>
-                  </Popup>
-                </Marker>
-              ))}
-            </MapContainer>
+            <MapView searchResults={searchResults} routeGeometry={routeGeometry} />
           </Box>
         </Paper>
 

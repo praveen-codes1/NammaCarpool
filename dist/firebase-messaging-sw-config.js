@@ -10,4 +10,10 @@ const firebaseConfig = {
   measurementId: 'G-4LGZ5LEV59'
 };
 
+// Make sure Firebase is initialized with the proper configuration
 firebase.initializeApp(firebaseConfig);
+
+// Set the VAPID key for push notifications
+firebase.messaging().getToken({
+  vapidKey: 'BJA6lPZ84IG83U_6XoaNJUrEZaVCMVAY2BXqnScFybpmiHtfZKDbpF30PZAxR-QR40R7I80-ve_G378V5kNMRIE'
+});

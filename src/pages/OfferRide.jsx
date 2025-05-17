@@ -33,6 +33,7 @@ import { collection, addDoc } from 'firebase/firestore';
 import { getMapOptions, searchLocation, getRoute, formatAddress, isWithinBangalore } from '../utils/maps';
 import { handleNotification } from '../utils/notifications';
 import { configureMapIcons } from '../utils/mapIcons';
+import { GeoJSON } from 'react-leaflet';
 
 // Fix Leaflet default icon issue
 delete L.Icon.Default.prototype._getIconUrl;
@@ -44,6 +45,60 @@ L.Icon.Default.mergeOptions({
 
 // Configure map icons
 configureMapIcons();
+
+// Safe Map component to prevent crashes
+const SafeMap = ({ sourceDetails, destinationDetails, routeGeometry }) => {
+  // Safe render for GeoJSON
+  const renderRoute = () => {
+    if (!routeGeometry) return null;
+    
+    try {
+      return (
+        <GeoJSON 
+          key={Math.random().toString(36).substring(7)} 
+          data={routeGeometry} 
+          style={{ color: '#0066ff', weight: 4 }} 
+        />
+      );
+    } catch (error) {
+      console.error("Error rendering route:", error);
+      return null;
+    }
+  };
+
+  return (
+    <MapContainer
+      {...getMapOptions()}
+      style={{ height: '100%', width: '100%' }}
+    >
+      <TileLayer
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+      />
+      {sourceDetails && sourceDetails.location && (
+        <Marker 
+          position={[
+            sourceDetails.location.lat,
+            sourceDetails.location.lng
+          ]}
+        >
+          <Popup>Pickup Location</Popup>
+        </Marker>
+      )}
+      {destinationDetails && destinationDetails.location && (
+        <Marker
+          position={[
+            destinationDetails.location.lat,
+            destinationDetails.location.lng
+          ]}
+        >
+          <Popup>Drop-off Location</Popup>
+        </Marker>
+      )}
+      {renderRoute()}
+    </MapContainer>
+  );
+};
 
 const OfferRide = () => {
   const navigate = useNavigate();
@@ -131,101 +186,153 @@ const OfferRide = () => {
 
   const handleSourceSelect = async (event, place) => {
     console.log("Selected source place:", place);
+    
+    // If no place selected, do nothing but don't show error
     if (!place || typeof place !== 'object') {
-      setError('Please select a location from the suggestions.');
       return;
     }
     
-    // Ensure place has necessary properties
-    if (!place.lat || !place.lng) {
-      console.error('Invalid place object:', place);
-      setError('Invalid location data. Please try again.');
-      return;
-    }
-    
-    if (!isWithinBangalore(place.lat, place.lng)) {
-      setError('Source location must be within Bangalore');
-      return;
-    }
-    
-    // Ensure location object is properly formatted
-    const formattedPlace = {
-      ...place,
-      location: {
-        lat: place.lat,
-        lng: place.lng
+    try {
+      // Clear any previous errors
+      setError('');
+      
+      // Ensure place has necessary properties
+      if (!place.lat || !place.lng) {
+        console.error('Invalid place object:', place);
+        setError('Invalid location data. Please try again.');
+        return;
       }
-    };
-    
-    setFormData(prev => ({
-      ...prev,
-      source: place.display_name,
-      sourceDetails: formattedPlace
-    }));
-    
-    console.log('Source location set:', formattedPlace);
-    
-    if (formData.destinationDetails && formData.destinationDetails.location) {
-      try {
-        const routeResult = await getRoute(
-          { lat: place.lat, lng: place.lng },
-          formData.destinationDetails.location
-        );
-        setRouteGeometry(routeResult.geometry);
-      } catch (err) {
-        console.error('Error getting route:', err);
-        // Don't show the error to the user, just log it
+      
+      if (!isWithinBangalore(place.lat, place.lng)) {
+        setError('Source location must be within Bangalore');
+        return;
       }
+      
+      // Ensure location object is properly formatted
+      const formattedPlace = {
+        ...place,
+        location: {
+          lat: place.lat,
+          lng: place.lng
+        }
+      };
+      
+      // Update form data with the new source
+      setFormData(prev => ({
+        ...prev,
+        source: place.display_name,
+        sourceDetails: formattedPlace
+      }));
+      
+      console.log('Source location set:', formattedPlace);
+      
+      // Only try to get route if we have both source and destination
+      if (formData.destinationDetails && formData.destinationDetails.location) {
+        try {
+          // Show loading state while fetching route
+          setLoading(true);
+          
+          const routeResult = await getRoute(
+            { lat: place.lat, lng: place.lng },
+            formData.destinationDetails.location
+          );
+          
+          // Only set route geometry if we got valid data
+          if (routeResult && routeResult.geometry) {
+            setRouteGeometry(routeResult.geometry);
+          } else {
+            // Clear route geometry if no valid data
+            setRouteGeometry(null);
+            console.log('No valid route data received');
+          }
+        } catch (err) {
+          console.error('Error getting route:', err);
+          setRouteGeometry(null);
+        } finally {
+          setLoading(false);
+        }
+      }
+    } catch (error) {
+      console.error('Error in handleSourceSelect:', error);
+      // Don't show errors to the user for a smoother experience
+      setRouteGeometry(null);
+      setLoading(false);
     }
   };
 
   const handleDestinationSelect = async (event, place) => {
     console.log("Selected destination place:", place);
+    
+    // If no place selected, do nothing but don't show error
     if (!place || typeof place !== 'object') {
-      setError('Please select a location from the suggestions.');
       return;
     }
     
-    // Ensure place has necessary properties
-    if (!place.lat || !place.lng) {
-      console.error('Invalid place object:', place);
-      setError('Invalid location data. Please try again.');
-      return;
-    }
-    
-    if (!isWithinBangalore(place.lat, place.lng)) {
-      setError('Destination location must be within Bangalore');
-      return;
-    }
-    
-    // Ensure location object is properly formatted
-    const formattedPlace = {
-      ...place,
-      location: {
-        lat: place.lat,
-        lng: place.lng
+    try {
+      // Clear any previous errors
+      setError('');
+      
+      // Ensure place has necessary properties
+      if (!place.lat || !place.lng) {
+        console.error('Invalid place object:', place);
+        setError('Invalid location data. Please try again.');
+        return;
       }
-    };
-    
-    setFormData(prev => ({
-      ...prev,
-      destination: place.display_name,
-      destinationDetails: formattedPlace
-    }));
-    
-    console.log('Destination location set:', formattedPlace);
-    
-    if (formData.sourceDetails && formData.sourceDetails.location) {
-      try {
-        const routeResult = await getRoute(
-          formData.sourceDetails.location,
-          { lat: place.lat, lng: place.lng }
-        );
-        setRouteGeometry(routeResult.geometry);
-      } catch (err) {
-        console.error('Error getting route:', err);
-        // Don't show the error to the user, just log it
+      
+      if (!isWithinBangalore(place.lat, place.lng)) {
+        setError('Destination location must be within Bangalore');
+        return;
       }
+      
+      // Ensure location object is properly formatted
+      const formattedPlace = {
+        ...place,
+        location: {
+          lat: place.lat,
+          lng: place.lng
+        }
+      };
+      
+      // Update form data with the new destination
+      setFormData(prev => ({
+        ...prev,
+        destination: place.display_name,
+        destinationDetails: formattedPlace
+      }));
+      
+      console.log('Destination location set:', formattedPlace);
+      
+      // Only try to get route if we have both source and destination
+      if (formData.sourceDetails && formData.sourceDetails.location) {
+        try {
+          // Show loading state while fetching route
+          setLoading(true);
+          
+          const routeResult = await getRoute(
+            formData.sourceDetails.location,
+            { lat: place.lat, lng: place.lng }
+          );
+          
+          // Only set route geometry if we got valid data
+          if (routeResult && routeResult.geometry) {
+            setRouteGeometry(routeResult.geometry);
+          } else {
+            // Clear route geometry if no valid data
+            setRouteGeometry(null);
+            console.log('No valid route data received');
+          }
+        } catch (err) {
+          console.error('Error getting route:', err);
+          setRouteGeometry(null);
+        } finally {
+          setLoading(false);
+        }
+      }
+    } catch (error) {
+      console.error('Error in handleDestinationSelect:', error);
+      // Don't show errors to the user for a smoother experience
+      setRouteGeometry(null);
+      setLoading(false);
     }
   };
 
@@ -400,38 +507,11 @@ const OfferRide = () => {
               {/* Map Display */}
               <Grid item xs={12}>
                 <Box sx={{ height: '300px', width: '100%', mb: 3 }}>
-                  <MapContainer
-                    {...getMapOptions()}
-                    style={{ height: '100%', width: '100%' }}
-                  >
-                    <TileLayer
-                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                    />
-                    {formData.sourceDetails && (
-                      <Marker 
-                        position={[
-                          formData.sourceDetails.location.lat,
-                          formData.sourceDetails.location.lng
-                        ]}
-                      >
-                        <Popup>Pickup Location</Popup>
-                      </Marker>
-                    )}
-                    {formData.destinationDetails && (
-                      <Marker
-                        position={[
-                          formData.destinationDetails.location.lat,
-                          formData.destinationDetails.location.lng
-                        ]}
-                      >
-                        <Popup>Drop-off Location</Popup>
-                      </Marker>
-                    )}
-                    {routeGeometry && (
-                      <GeoJSON data={routeGeometry} style={{ color: '#0066ff', weight: 4 }} />
-                    )}
-                  </MapContainer>
+                  <SafeMap
+                    sourceDetails={formData.sourceDetails}
+                    destinationDetails={formData.destinationDetails}
+                    routeGeometry={routeGeometry}
+                  />
                 </Box>
               </Grid>
 

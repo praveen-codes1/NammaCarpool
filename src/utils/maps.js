@@ -34,26 +34,43 @@ export const getRoute = async (origin, destination) => {
   // Validate input parameters
   if (!origin || !destination || !origin.lat || !origin.lng || !destination.lat || !destination.lng) {
     console.error('Invalid parameters for getRoute:', { origin, destination });
-    throw new Error('Invalid coordinates for route calculation');
+    return { geometry: null, distance: 0, duration: 0 }; // Return empty data instead of throwing
   }
 
   try {
     console.log('Fetching route between', origin, 'and', destination);
+    
+    // Add timeout to fetch to prevent hanging
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+    
     const response = await fetch(
-      `https://router.project-osrm.org/route/v1/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=full&geometries=geojson`
+      `https://router.project-osrm.org/route/v1/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=full&geometries=geojson`,
+      { signal: controller.signal }
     );
+    
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Route API error:', response.status, errorText);
-      throw new Error(`Failed to get route: ${response.status}`);
+      return { geometry: null, distance: 0, duration: 0 };
     }
 
     const data = await response.json();
     
     if (!data.routes || data.routes.length === 0) {
       console.error('No route found between points');
-      throw new Error('No route found');
+      return { geometry: null, distance: 0, duration: 0 };
+    }
+
+    // Validate geometry data before returning
+    if (!data.routes[0].geometry || 
+        !data.routes[0].geometry.coordinates || 
+        !Array.isArray(data.routes[0].geometry.coordinates) ||
+        data.routes[0].geometry.coordinates.length === 0) {
+      console.error('Invalid geometry data received');
+      return { geometry: null, distance: 0, duration: 0 };
     }
 
     return {
@@ -62,12 +79,12 @@ export const getRoute = async (origin, destination) => {
         properties: {},
         geometry: data.routes[0].geometry
       },
-      distance: data.routes[0].distance,
-      duration: data.routes[0].duration
+      distance: data.routes[0].distance || 0,
+      duration: data.routes[0].duration || 0
     };
   } catch (error) {
     console.error('Error getting route:', error);
-    throw error;
+    return { geometry: null, distance: 0, duration: 0 };
   }
 };
 

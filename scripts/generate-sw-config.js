@@ -21,7 +21,13 @@ const firebaseConfig = {
   measurementId: '${process.env.VITE_FIREBASE_MEASUREMENT_ID}'
 };
 
+// Make sure Firebase is initialized with the proper configuration
 firebase.initializeApp(firebaseConfig);
+
+// Set the VAPID key for push notifications
+firebase.messaging().getToken({
+  vapidKey: '${process.env.VITE_FIREBASE_VAPID_KEY || ''}'
+});
 `;
 
 const swPath = join(__dirname, '../public/firebase-messaging-sw-config.js');
